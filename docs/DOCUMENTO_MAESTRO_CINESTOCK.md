@@ -200,6 +200,65 @@ Siempre reflejará el funcionamiento real del cine.
 
 
 .
+📜 REGLA Nº 1
+La IA debe ayudar al trabajador, nunca darle más trabajo.
+
+Si para usar una función hay que hacer más pasos que ahora...
+
+❌ Se elimina.
+
+Si ahorra tiempo, evita errores o reduce esfuerzo...
+
+✅ Se queda.
+
+📜 REGLA Nº 2
+CineStock debe parecer que siempre ha estado ahí.
+
+No queremos una aplicación llena de botones.
+
+Queremos una herramienta.
+
+Como un cúter.
+
+Como un transpalé.
+
+Como un rotulador.
+
+Debe ser estable, sencilla y aburridamente fiable.
+
+📜 REGLA Nº 3
+La IA debe observar más que preguntar.
+
+En lugar de preguntar continuamente:
+
+❌ ¿Has terminado?
+
+❌ ¿Has colocado esto?
+
+❌ ¿Está pendiente?
+
+Debe intentar observar.
+
+📷 Haces una foto.
+
+La IA trabaja.
+
+Y solo habla cuando realmente tiene algo útil que decir.
+
+📜 REGLA Nº 4
+La IA nunca intentará comprobar algo que obligue al operario a desmontar el pedido.
+
+Por ejemplo:
+
+❌ Abrir todas las cajas.
+
+❌ Separar todas las bolsas de gominolas.
+
+❌ Contar una a una las chocolatinas.
+
+Eso no es ayuda.
+
+Eso es crear trabajo.
 
 📜 Regla nº 5
 
