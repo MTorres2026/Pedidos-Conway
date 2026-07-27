@@ -197,3 +197,12 @@ Este documento se irá ampliando durante todo el desarrollo del proyecto.
 Nunca se eliminará información importante.
 
 Siempre reflejará el funcionamiento real del cine.
+
+
+.
+
+📜 Regla nº 5
+
+No desarrollaremos una función solo porque sea técnicamente posible.
+
+Solo la desarrollaremos si mejora realmente el trabajo diario del cine.
