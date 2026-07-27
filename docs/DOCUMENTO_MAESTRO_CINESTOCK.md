@@ -1,5 +1,17 @@
 # DOCUMENTO MAESTRO - CINESTOCK
 
+Filosofía CineStock
+
+CineStock no existe para informatizar el trabajo.
+
+Existe para eliminar tareas repetitivas.
+
+La mejor pantalla es la que el trabajador no necesita abrir.
+
+La mejor pregunta es la que la aplicación no necesita hacer.
+
+La mejor IA es la que trabaja mientras el operario sigue trabajando.
+
 > Proyecto de digitalización integral del almacén y automatización de pedidos para cines.
 
 ---
