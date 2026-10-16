@@ -1,0 +1,15 @@
+RESULTADO: 5 de 6 líneas sin incidencias, 1 con problemas.
+
+LÍNEAS CON PROBLEMAS (revísalas a mano en el ERP):
+
+   Fila 6  |  Artículo 1002060036  |  Cant. 1  |  UM GBP  |  Salchicha XXL
+        -> El ERP no acepta la UM 'GBP' para este artículo (Valor no válido)  (revisa la UM o el artículo; la línea queda vacía)
+
+QUÉ HACER:
+   1) Corrige a mano en el ERP las líneas indicadas (código de artículo, UM o cantidad).
+   2) Revisa el resto del pedido y pulsa Guardar tú mismo (el programa NO guarda).
+   3) Si hace falta, corrige el archivo de datos y vuelve a ejecutar solo con esas líneas.
+   (Chrome se queda abierto: no lo cierres hasta haber guardado el pedido.)
+
+Este informe se ha guardado en: C:\Users\Marku\Desktop\anterior\CINESTOCK\Proyectos\Pedidos-Conway\src\errores_pedido_20261013_120526.txt
+Captura de la pantalla: C:\Users\Marku\Desktop\anterior\CINESTOCK\Proyectos\Pedidos-Conway\src\pantalla_pedido_20261013_120526.png

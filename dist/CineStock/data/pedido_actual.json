@@ -1,0 +1,38 @@
+{
+  "pedido": {
+    "orderId": 2,
+    "fechaInforme": "08/09/2026",
+    "cine": "vista_reporte.pdf",
+    "totalLineas": 3,
+    "timestamp": 1788986746655
+  },
+  "lineas": [
+    {
+      "codigo": "9315",
+      "descripcion": "Salsa Trufa",
+      "cantidadPedida": 2,
+      "unidad": "LTS",
+      "stockOriginal": 0,
+      "esFamiliaAgrupada": false,
+      "desglose": []
+    },
+    {
+      "codigo": "9887",
+      "descripcion": "Pizza Margarita 27 cm",
+      "cantidadPedida": 2,
+      "unidad": "PZA",
+      "stockOriginal": 0,
+      "esFamiliaAgrupada": false,
+      "desglose": []
+    },
+    {
+      "codigo": "9889",
+      "descripcion": "Pizza Peperoni 27 cm",
+      "cantidadPedida": 2,
+      "unidad": "PZA",
+      "stockOriginal": 0,
+      "esFamiliaAgrupada": false,
+      "desglose": []
+    }
+  ]
+}

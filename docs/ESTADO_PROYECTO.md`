@@ -1,0 +1,36 @@
+# 🚀 Estado del Proyecto: CineStock / Pedidos-Conway
+**Última actualización:** 2026-10-13
+
+## 📌 Resumen General
+CineStock es un asistente inteligente para la gestión de pedidos de un cine, diseñado para reducir errores administrativos y tareas repetitivas, manteniendo siempre el control final en manos del usuario.
+
+## 🛠️ Arquitectura Técnica
+- **Lenguaje:** Python
+- **Interfaz:** PySide6 (Qt6)
+- **Entrada de Datos:** Servidor receptor HTTP (`receptor.py`) que recibe pedidos multipart (JSON + PDFs) desde una App Android (Flow).
+- **Almacenamiento:** Archivos JSON en la carpeta `data/`.
+
+## ✅ Funcionalidades Implementadas y Probadas
+1. **Receptor de Pedidos:** Capacidad de recibir y guardar el JSON del pedido y los PDFs asociados (Normal y Granel).
+2. **Interfaz de Usuario:** Ventana principal con menú lateral y gestión de estados (PENDIENTE, PROCESANDO, ENVIADO A ERP).
+3. **Sistema de Consultas IA:** Buscador de procedimientos internos basado en lenguaje natural (`src/modulos/procedimientos.py`).
+4. **Gestión de Pedidos:**
+   - Carga y visualización de líneas de pedido.
+   - Sistema de corrección manual de cantidades y códigos.
+   - Unificación de productos de Granel en el listado total.
+5. **Visualización de Informes:**
+   - Implementación de apertura de PDFs (Stockable y Granel) recibidos desde la App Android.
+   - **Estado actual:** Se utiliza la apertura mediante el visor externo del sistema (`os.startfile`) para garantizar la fidelidad total a la plantilla oficial rellenada por la encargada.
+
+## ⚠️ Puntos Críticos y Soluciones Aplicadas
+- **Error de Atributo PDF:** Se corrigió el error de sintaxis relacionado con `QPdfDocument.Error.None` sustituyéndolo por una comprobación de `pageCount() > 0`.
+- **Unificación Granel:** Se aseguró que el flujo de granel (que viaja en un PDF y JSON distinto) se consolide en la vista de Windows.
+
+## 📅 Pendientes y Próximos Pasos
+- [ ] **Subida a la Nube:** Implementar la funcionalidad para subir los informes revisados a la nube.
+- [ ] **Optimización del Visor Interno:** Investigar una forma estable de mostrar los PDFs dentro de la app sin romper la compatibilidad de versiones de PySide6.
+- [ ] **Automatización ERP:** Refinar el robot de carga en el ERP para asegurar la estabilidad del proceso.
+
+---
+**Instrucción para Claude en nuevas sesiones:**
+*Si eres una nueva instancia de Claude, lee este archivo y la `Especificacion_Funcional.md` para recuperar todo el contexto técnico y funcional del proyecto antes de proponer cambios.*

@@ -1,0 +1,114 @@
+{
+    "version_base": 1,
+
+    "procedimientos": [
+
+        {
+            "id": "cambiar_pelicula_de_sala",
+            "version": 1,
+            "estado": "CONFIRMADO",
+            "fecha_creacion": "2026-08-10",
+            "ultima_revision": "2026-08-10",
+
+            "sistema": "Cinema Manager",
+            "categoria": "Programación",
+            "titulo": "Cambiar una película de una sala a otra",
+
+            "preguntas_clave": [
+                "¿Cómo cambio una película de sala?",
+                "¿Cómo cambio una película de una sala a otra?",
+                "¿Cómo cambio la programación de una película?",
+                "¿Cómo muevo una película a otra sala?"
+            ],
+
+            "objetivo": "Cambiar una película que está programada en una sala a otra sala y ajustar posteriormente sus horarios.",
+
+            "pasos": [
+                "Arrastra la película que queremos cambiar encima de la película correspondiente.",
+                "Déjala en la sala en la que estaba programada la otra película.",
+                "Después podemos modificar la hora de comienzo de cada una."
+            ],
+
+            "comprobaciones": [
+                "Comprobar que la película ha quedado en la sala correcta.",
+                "Comprobar las horas de comienzo después del cambio."
+            ],
+
+            "advertencias": [
+                "Revisar la programación final antes de dar el cambio por terminado."
+            ],
+
+            "fuente": {
+                "tipo": "usuario",
+                "descripcion": "Explicación proporcionada por el usuario"
+            },
+
+            "historial": [
+                {
+                    "version": 1,
+                    "fecha": "2026-08-10",
+                    "cambio": "Creación del procedimiento."
+                }
+            ]
+        },
+
+        {
+            "id": "matinales_centros_educativos",
+            "version": 1,
+            "estado": "CONFIRMADO_DOCUMENTO",
+            "fecha_creacion": "2026-08-13",
+            "ultima_revision": "2026-08-13",
+
+            "categoria": "Matinales",
+            "titulo": "Gestión de matinales de centros educativos",
+
+            "preguntas_clave": [
+                "¿Cómo se tramita una matinal?",
+                "¿Cómo gestionamos una matinal?",
+                "¿Qué tengo que hacer con una matinal?",
+                "¿Cómo se organiza una matinal de un colegio?",
+                "¿Qué hay que comunicar al programador para una matinal?"
+            ],
+
+            "objetivo": "Gestionar las matinales de centros educativos siguiendo las instrucciones documentadas para el curso escolar 2025/2026.",
+
+            "pasos": [
+                "Todas las matinales deben informarse al programador.",
+                "Para títulos Disney, antes de confirmar precio o versión con el centro, hay que rellenar el Formulario Pases Privados y enviarlo al programador.",
+                "No se deben dar matinales de títulos Disney sin autorización previa de programación.",
+                "Para el resto de títulos, se debe comunicar al programador el día, horario, película y número de alumnos.",
+                "Antes del pase, comprobar que la película está en la sala y versión acordadas y que el KDM/DCP funciona correctamente.",
+                "Crear el pase con la configuración correspondiente.",
+                "El día de la matinal, marcar el pase realizado y contabilizar los asistentes."
+            ],
+
+            "comprobaciones": [
+                "Comprobar que la matinal ha sido comunicada al programador.",
+                "En títulos Disney, comprobar que existe autorización previa.",
+                "Comprobar película, sala y versión acordadas.",
+                "Comprobar que el KDM/DCP funciona correctamente.",
+                "Comprobar y contabilizar los asistentes."
+            ],
+
+            "advertencias": [
+                "Los títulos Disney requieren autorización previa de programación.",
+                "Las instrucciones corresponden a la documentación revisada para el curso escolar 2025/2026."
+            ],
+
+            "fuente": {
+                "tipo": "documento",
+                "descripcion": "Correo interno y actualización de instrucciones de matinales para el curso escolar 2025/2026",
+                "fecha_actualizacion_documento": "2025-08-01",
+                "fecha_recordatorio": "2025-10-10"
+            },
+
+            "historial": [
+                {
+                    "version": 1,
+                    "fecha": "2026-08-13",
+                    "cambio": "Incorporación del conocimiento a CineStock a partir de la documentación revisada."
+                }
+            ]
+        }
+    ]
+}

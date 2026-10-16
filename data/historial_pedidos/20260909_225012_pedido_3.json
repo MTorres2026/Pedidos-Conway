@@ -1,0 +1,29 @@
+{
+  "pedido": {
+    "orderId": 3,
+    "fechaInforme": "09/09/2026",
+    "cine": "vista_reporte.pdf",
+    "totalLineas": 2,
+    "timestamp": 1788987012064
+  },
+  "lineas": [
+    {
+      "codigo": "46",
+      "descripcion": "Gusanitos Risi",
+      "cantidadPedida": 5,
+      "unidad": "PZA",
+      "stockOriginal": 0,
+      "esFamiliaAgrupada": false,
+      "desglose": []
+    },
+    {
+      "codigo": "9312",
+      "descripcion": "Doritos Tex-Mex",
+      "cantidadPedida": 2,
+      "unidad": "PZA",
+      "stockOriginal": 0,
+      "esFamiliaAgrupada": false,
+      "desglose": []
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+RESULTADO: 3 de 7 líneas sin incidencias, 4 con problemas.
+
+PROBLEMAS GENERALES (cabecera / sistema):
+   - No se pudo hacer la verificación final de las líneas  (no se encontró el campo en la pantalla (la fila no existe o la pantalla cambió))
+
+LÍNEAS CON PROBLEMAS (revísalas a mano en el ERP):
+
+   Fila 4  |  Artículo 1002060037  |  Cant. 1  |  UM GBP  |  Pan Perrito XXL
+        -> No se pudo escribir el artículo  (no such window: target window already closed from unknown error: web view not found)
+
+   Fila 5  |  Artículo 1002060071  |  Cant. 4  |  UM GBQ  |  Tekefingers Horno
+        -> No se pudo escribir el artículo  (no se encontró el campo en la pantalla (la fila no existe o la pantalla cambió))
+
+   Fila 6  |  Artículo 1002060123  |  Cant. 1  |  UM GBD  |  Galletas Gullon
+        -> No se pudo escribir el artículo  (no se encontró el campo en la pantalla (la fila no existe o la pantalla cambió))
+
+   Fila 7  |  Artículo 1001040019  |  Cant. 1  |  UM HUF  |  Fiesta Kojak Cereza
+        -> No se pudo escribir el artículo  (no se encontró el campo en la pantalla (la fila no existe o la pantalla cambió))
+
+QUÉ HACER:
+   1) Corrige a mano en el ERP las líneas indicadas (código de artículo, UM o cantidad).
+   2) Revisa el resto del pedido y pulsa Guardar tú mismo (el programa NO guarda).
+   3) Si hace falta, corrige el archivo de datos y vuelve a ejecutar solo con esas líneas.
+   (Chrome se queda abierto: no lo cierres hasta haber guardado el pedido.)
+
+Este informe se ha guardado en: C:\Users\Marku\Desktop\claude-prueba\Pedidos-Conway\src\errores_pedido_20261015_035138.txt

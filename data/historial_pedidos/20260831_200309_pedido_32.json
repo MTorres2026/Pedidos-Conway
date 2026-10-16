@@ -1,0 +1,25 @@
+{
+  "pedido": {
+    "orderId": 32,
+    "fechaInforme": "31/08/2026",
+    "cine": "vista_reporte.pdf",
+    "totalLineas": 2,
+    "timestamp": 1788199389187
+  },
+  "lineas": [
+    {
+      "codigo": "10321",
+      "descripcion": "Salsa Chunky",
+      "cantidadPedida": 1,
+      "unidad": "KGS",
+      "stockOriginal": 0
+    },
+    {
+      "codigo": "10509",
+      "descripcion": "Pizza Mac and Cheese",
+      "cantidadPedida": 2,
+      "unidad": "PZA",
+      "stockOriginal": 0
+    }
+  ]
+}
