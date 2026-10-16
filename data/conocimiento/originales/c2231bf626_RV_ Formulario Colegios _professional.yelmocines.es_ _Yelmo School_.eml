@@ -1,0 +1,91 @@
+Received: from SN7PR18MB3902.namprd18.prod.outlook.com (2603:10b6:806:10b::5)
+ by MN0PR18MB5997.namprd18.prod.outlook.com with HTTPS; Thu, 3 Jul 2025
+ 12:55:29 +0000
+Received: from MN2PR18MB3623.namprd18.prod.outlook.com (2603:10b6:208:266::7)
+ by SN7PR18MB3902.namprd18.prod.outlook.com (2603:10b6:806:10b::5) with
+ Microsoft SMTP Server (version=TLS1_2,
+ cipher=TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384) id 15.20.8901.23; Thu, 3 Jul
+ 2025 12:55:28 +0000
+Received: from MN2PR18MB3623.namprd18.prod.outlook.com
+ ([fe80::79d1:ef59:8e61:2653]) by MN2PR18MB3623.namprd18.prod.outlook.com
+ ([fe80::79d1:ef59:8e61:2653%5]) with mapi id 15.20.8901.021; Thu, 3 Jul 2025
+ 12:55:27 +0000
+From: Beatriz Monino Calabria <beatriz_monino@yelmocines.es>
+To: Los Prados Yelmo Cines <los_prados@yelmocines.es>
+CC: Sonia Tezanos <sonia_tezanos@yelmocines.es>
+Subject: RV: Formulario Colegios (professional.yelmocines.es) (Yelmo School)
+Thread-Topic: Formulario Colegios (professional.yelmocines.es) (Yelmo School)
+Thread-Index: AQHb7AxWTC7M3kr+C0+Zo9HgpFTFr7QgW2aA
+Date: Thu, 3 Jul 2025 12:55:27 +0000
+Message-ID:
+	<MN2PR18MB36235E4D380B027223C94CE5EA43A@MN2PR18MB3623.namprd18.prod.outlook.com>
+References:
+	<4z4GTq3OM3bLq4C0dEVW4ZqC2zMrrY2HDJtHMF2k34@professional.yelmocines.es>
+In-Reply-To:
+	<4z4GTq3OM3bLq4C0dEVW4ZqC2zMrrY2HDJtHMF2k34@professional.yelmocines.es>
+Accept-Language: es-ES, en-US
+Content-Language: es-ES
+X-MS-Exchange-Organization-AuthAs: Internal
+X-MS-Exchange-Organization-AuthMechanism: 04
+X-MS-Exchange-Organization-AuthSource: MN2PR18MB3623.namprd18.prod.outlook.com
+X-MS-Exchange-Organization-SupervisoryReview-OcrResultLocation:
+	{"Status":"OcrRequired","CorrelationId":null,"Locations":null}
+X-MS-Has-Attach:
+X-MS-Exchange-Organization-Network-Message-Id:
+	6a516372-a98a-4a26-8bc9-08ddba30e291
+X-MS-Exchange-Organization-SCL: 1
+X-MS-TNEF-Correlator:
+X-MS-Exchange-Organization-RecordReviewCfmType: 0
+x-ms-publictraffictype: Email
+authentication-results: dkim=none (message not signed)
+ header.d=none;dmarc=none action=none header.from=yelmocines.es;
+x-ms-office365-filtering-correlation-id: 6a516372-a98a-4a26-8bc9-08ddba30e291
+x-ms-traffictypediagnostic:
+	MN2PR18MB3623:EE_|SN7PR18MB3902:EE_|MN0PR18MB5997:EE_
+x-forefront-antispam-report:
+	CIP:255.255.255.255;CTRY:;LANG:es;SCL:1;SRV:;IPV:NLI;SFV:NSPM;H:MN2PR18MB3623.namprd18.prod.outlook.com;PTR:;CAT:NONE;SFS:(13230040)(366016)(41050700001);DIR:INT;
+x-microsoft-antispam: BCL:0;ARA:13230040|366016|41050700001;
+x-ms-exchange-crosstenant-network-message-id:
+	6a516372-a98a-4a26-8bc9-08ddba30e291
+x-ms-exchange-crosstenant-originalarrivaltime: 03 Jul 2025 12:55:27.8378 (UTC)
+x-ms-exchange-crosstenant-fromentityheader: Hosted
+x-ms-exchange-crosstenant-id: d95b8428-3729-4ecd-a6f3-beee9ba8c6cb
+x-ms-exchange-crosstenant-mailboxtype: HOSTED
+x-ms-exchange-crosstenant-userprincipalname:
+	OX0i+bZhaE1nAH1zy3Ww3tpx2Fj/gga7+HH2vWj1oQhkTdYzaFUQFDAmsBbl9wBGXrtg/GMtz480eUbmyxbaQw==
+x-ms-exchange-transport-crosstenantheadersstamped: SN7PR18MB3902
+x-ms-exchange-atpmessageproperties: SA|SL
+x-ms-exchange-transport-endtoendlatency: 00:00:02.1034267
+x-ms-exchange-processed-by-bccfoldering: 15.20.8857.037
+x-ms-exchange-crosstenant-authas: Internal
+x-ms-exchange-crosstenant-authsource: MN2PR18MB3623.namprd18.prod.outlook.com
+X-Microsoft-Antispam-Mailbox-Delivery:
+	ucf:0;jmr:0;auth:0;dest:I;ENG:(910005)(944506478)(944626604)(920097)(425001)(930097)(140003)(1420198);
+X-Microsoft-Antispam-Message-Info:
+	U1SAHRaRunw5Po1t4sNu/Wg7SzKp+pgx+aQZsP4a3OHaLTju/vbfL2Fp1WKOYcTBuHlWhiM1B3G9IMzggSWTSitYkuDB8VS6BUOsrJw82b+XbMCFCsdB9mIAai5e0A0SwXbBvZ0jzuhWPBVPsdwZanCLd4KAXnXrwc7UO/5f0joGY+twWCl1VV5WSJRiwiz8a/cZCfqtt5XKSDRU5tpW1PQhFDRkFvULbj/JvG+j6JKa771Fkmor9yAxWkRDluknHfati4z5df1C5v31T9Uh21YH4umqFJHmJ22EFTcu8LkkRk6FVmFCnjL7PgCwW3qdK7hVH4mLh9mT8GN+/WNIQi4uTk+6TkSPx0ESy/com/TsEFrmnxp0GMenp2w0PZPe2uDpykHicOiVnrMgFbFoJNwdbSSfzESnHuYkVZjI6F+0DFCoz7/TqO1KzRZu56/LRkbfcPFbiOoJhDFIgHZjjvGOzPJJXuIwb8+Mfo+a1Za7BYJxmfKtv+hFcA72PzOAoqKio7jrObZ+e9sVmKqvn18T294Q2Pp14XiZ/O303QBVV6gXQjZg71o7zL/XO8jlTydlIkB4JpqpyZ9X90dKu6p41Xjwqs0Emsg8zMeL870TajA3b1135z1IjRrQWZfiprkcH6qtQKT76VsEknoL1lk+w/OUEOcSh6Ggl/HEf5cXdXDmbg2LWgf2n0E+FPKbk3HQKC/3Wl/CIJ9H6o35/Mz6wEfSkzT2CZo/uEas/kXn1c8VHGh6Ma6DQ4rvD1G++9zb7vj6tZ04Cq+veHuFgZriOPAF2QMdlMs5EldeIfw=
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: base64
+MIME-Version: 1.0
+
+QnVlbm9zIGTDrWFzIGNvbXBhw7Flcm9zLCANCg0KQ29uZmlybWFyIGNvbiB2b3NvdHJvcyBsYSBy
+ZWNlcGNpw7NuIGRlIGVzdGUgZW1haWwgcHJlZ3VudGFuZG8gcGFyYSB1bmEgcmVzZXJ2YSBwYXJh
+IGVsIHByb3llY3RvIFlFTE1PU0NIT09MIEkgU2VtYW5hIGVuIHZhbG9yZXM6IFBvciBlbCBmdXR1
+cm8gZGVsIHBsYW5ldGEgZGUgb2N0dWJyZSwgcGFyYSBxdWUgcG9kw6FpcyBkYXJsZSByZXNwdWVz
+dGEuIA0KDQpTaSB0ZW7DqWlzIGN1YWxxdWllciBjb25zdWx0YSBubyBkdWTDqWlzIGVuIHByZWd1
+bnRhcm5vcy4gDQoNCsKhVW4gc2FsdWRvIQ0KDQpCZWF0cml6IE1vw7Fpbm8NCkFuYWxpc3RhIFZl
+bnRhcyBDb3Jwb3JhdGl2YXMgLSBDb21lcmNpYWxpemFjacOzbiANCkNpbmUgWWVsbW8gSSBDaW7D
+qXBvbGlzIEVzcGHDsWENCg0KLS0tLS1NZW5zYWplIG9yaWdpbmFsLS0tLS0NCkRlOiBZZWxtbyBD
+aW5lcyA8YXBwc195ZWxtb0BjaW5lcG9saXMuY29tPiANCkVudmlhZG8gZWw6IGp1ZXZlcywgMyBk
+ZSBqdWxpbyBkZSAyMDI1IDEzOjE5DQpQYXJhOiBDb2xlcyA8Y29sZXNAeWVsbW9jaW5lcy5lcz47
+IExvcyBQcmFkb3MgWWVsbW8gQ2luZXMgPGxvc19wcmFkb3NAeWVsbW9jaW5lcy5lcz4NCkFzdW50
+bzogRm9ybXVsYXJpbyBDb2xlZ2lvcyAocHJvZmVzc2lvbmFsLnllbG1vY2luZXMuZXMpIChZZWxt
+byBTY2hvb2wpDQoNCkNhdXRpb246IFRoaXMgaXMgYW4gZXh0ZXJuYWwgZW1haWwuIFBsZWFzZSB0
+YWtlIGNhcmUgd2hlbiBjbGlja2luZyBsaW5rcyBvciBvcGVuaW5nIGF0dGFjaG1lbnRzLiBXaGVu
+IGluIGRvdWJ0LCBjb250YWN0IHNvY0BjaW5lcG9saXMuY29tDQoNCg0KT3BjacOzbjogbWF0aW5h
+bGVzLWNvbGVnaW9zDQoNCk5vbWJyZSBkZWwgY29sZWdpbzogQ29sZWdpbyBQYWxhY2lvIGRlIEdy
+YW5kYSBSZXNwb25zYWJsZSBkZWwgY29sZWdpbzogUGFibG8gR29uesOhbGV6IEdvbnrDoWxleg0K
+RW1haWw6IHAuZ29uemFsZXpAcGFsYWNpb2RlZ3JhbmRhLmNvbQ0KVGVsw6lmb25vOiA2OTk0Mzc0
+OTINCg0KTsK6IGRlIGFsdW1ub3M6IDcwDQpQcm92aW5jaWE6IEFzdHVyaWFzDQpDaW5lOiBDaW5l
+IFllbG1vIExvcyBQcmFkb3MNClBlbMOtY3VsYTogRXNjYXBlIGZyb20gRXh0aW5jdGlvbiBSZXdp
+bGRpbmcgVi5PLlMuRSAoSU5HTMOJUykNCkZlY2hhOiAyMy8xMC8yMDI1DQoNCkNvbWVudGFyaW9z
+OiBRdWlzaWVyYSByZWNpYmlyIG3DoXMgaW5mb3JtYWNpw7NuIGRlIGhvcmFyaW9zDQoNCg==

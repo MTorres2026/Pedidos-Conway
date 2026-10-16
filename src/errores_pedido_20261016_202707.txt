@@ -1,0 +1,38 @@
+EL PROGRAMA SE DETUVO ANTES DE TERMINAR:
+   Fallo en el paso «Pantalla inicial de Solicitudes (Unidad de Negocio / Añadir)»: no se encontró el campo en la pantalla (la fila no existe o la pantalla cambió)
+
+RESULTADO: 0 de 8 líneas sin incidencias, 8 con problemas.
+
+LÍNEAS CON PROBLEMAS (revísalas a mano en el ERP):
+
+   Fila 1  |  Artículo 1002060140  |  Cant. 1  |  UM GBE  |  Pizza Peperoni 27 cm
+        -> No se llegó a procesar
+
+   Fila 2  |  Artículo 1001030011  |  Cant. 1  |  UM GCH  |  Gusanitos Risi
+        -> No se llegó a procesar
+
+   Fila 3  |  Artículo 1003010109  |  Cant. 1  |  UM HAA  |  Queso en polvo
+        -> No se llegó a procesar
+
+   Fila 4  |  Artículo 1002060036  |  Cant. 1  |  UM HSO  |  Salchicha XXL
+        -> No se llegó a procesar
+
+   Fila 5  |  Artículo 1002060037  |  Cant. 1  |  UM GBP  |  Pan Perrito XXL
+        -> No se llegó a procesar
+
+   Fila 6  |  Artículo 1002060071  |  Cant. 1  |  UM GBQ  |  Tekefingers Horno
+        -> No se llegó a procesar
+
+   Fila 7  |  Artículo 1002060123  |  Cant. 1  |  UM GBD  |  Galletas Gullon
+        -> No se llegó a procesar
+
+   Fila 8  |  Artículo 1001050002  |  Cant. 2  |  UM GFX  |  Twix Minix 2,5 kg
+        -> No se llegó a procesar
+
+QUÉ HACER:
+   1) Corrige a mano en el ERP las líneas indicadas (código de artículo, UM o cantidad).
+   2) Revisa el resto del pedido y pulsa Guardar tú mismo (el programa NO guarda).
+   3) Si hace falta, corrige el archivo de datos y vuelve a ejecutar solo con esas líneas.
+   (Chrome se queda abierto: no lo cierres hasta haber guardado el pedido.)
+
+Este informe se ha guardado en: C:\Users\Marku\Desktop\PROYECTOS-IA\CineStock-Pedidos\claude-prueba\Pedidos-Conway\src\errores_pedido_20261016_202707.txt

@@ -1,3 +1,4 @@
+import re
 from .conocimiento import cargar_conocimiento
 
 
@@ -81,11 +82,17 @@ def buscar_procedimiento(pregunta):
 
     pregunta = pregunta.lower().strip()
 
-    # 1. Buscar coincidencias en preguntas clave
+        # 1. Buscar coincidencias en preguntas clave
+    def _limpia(texto):
+        return re.sub(r"[¿?¡!.,;:]", "", texto.lower()).strip()
+
+    pregunta_limpia = _limpia(pregunta)
+
     for procedimiento in PROCEDIMIENTOS.values():
 
-        for pregunta_clave in procedimiento.get("pregunta_clave", []):
-            if pregunta_clave.lower() in pregunta:
+        for pregunta_clave in procedimiento.get("preguntas_clave", []):
+            clave = _limpia(pregunta_clave)
+            if clave and (clave in pregunta_limpia or pregunta_limpia in clave):
                 return procedimiento
 
     # 2. Buscar palabras relevantes

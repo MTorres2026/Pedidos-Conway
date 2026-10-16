@@ -12,6 +12,7 @@ from modulos.procedimientos import buscar_procedimiento
 from ui.inicio import Inicio
 from ui.pedidos import Pedidos, HistorialPedidosDialog
 from ui.configuracion import Configuracion
+from ui.conocimiento import Conocimiento
 from ui.catalogo import Catalogo
 from pathlib import Path
 
@@ -39,6 +40,8 @@ class VentanaPrincipal(QMainWindow):
         self.menu.addItem("📦 Pedidos")         # Índice 1
         self.menu.addItem("📊 Historial")       # Índice 2
         self.menu.addItem("⚙️ Configuración")   # Índice 3
+        self.menu.addItem("📚 Conocimiento")
+        
         self.menu.addItem("📖 Catálogo")        # Índice 4
 
         # ===== Zona principal =====
@@ -55,6 +58,9 @@ class VentanaPrincipal(QMainWindow):
         self.configuracion = Configuracion()
         layout_contenido.addWidget(self.configuracion)
         self.configuracion.hide()
+        self.conocimiento = Conocimiento()
+        layout_contenido.addWidget(self.conocimiento)
+        self.conocimiento.hide()
 
         self.catalogo = Catalogo()
         layout_contenido.addWidget(self.catalogo)
@@ -79,6 +85,14 @@ class VentanaPrincipal(QMainWindow):
         self.pedidos.hide()
         self.configuracion.hide()
         self.catalogo.hide()
+        self.conocimiento.hide()
+        if fila == 4:
+         self.inicio.hide()
+         self.pedidos.hide()
+         self.configuracion.hide()
+         self.conocimiento.actualizar()
+         self.conocimiento.show()
+         return
 
         # Gestionar la selección del menú lateral
         if fila == 0:
@@ -97,5 +111,5 @@ class VentanaPrincipal(QMainWindow):
         elif fila == 3:
             self.configuracion.actualizar()
             self.configuracion.show()
-        elif fila == 4:
+        elif fila == 5:
             self.catalogo.show()

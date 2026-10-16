@@ -1,0 +1,430 @@
+Received: from DS4PPFE99134494.namprd18.prod.outlook.com
+ (2603:10b6:f:fc00::acd) by MN0PR18MB5997.namprd18.prod.outlook.com with
+ HTTPS; Tue, 17 Jun 2025 11:54:40 +0000
+Received: from SN7PR18MB3824.namprd18.prod.outlook.com (2603:10b6:806:f6::24)
+ by DS4PPFE99134494.namprd18.prod.outlook.com (2603:10b6:f:fc00::acd) with
+ Microsoft SMTP Server (version=TLS1_2,
+ cipher=TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384) id 15.20.8835.28; Tue, 17 Jun
+ 2025 11:54:36 +0000
+Received: from SN7PR18MB3824.namprd18.prod.outlook.com
+ ([fe80::aeca:2a0c:cf2f:bbc3]) by SN7PR18MB3824.namprd18.prod.outlook.com
+ ([fe80::aeca:2a0c:cf2f:bbc3%7]) with mapi id 15.20.8835.027; Tue, 17 Jun 2025
+ 11:54:35 +0000
+From: Desarrollo Organizacional <desarrolloorganizacional@yelmocines.es>
+To: Gerentes Yelmo DL <DL_gerentes_yelmo@yelmocines.es>, Cines Yelmo DL
+	<DL_cines_yelmo@yelmocines.es>
+CC: Miguel Escobero Caballero <miguel_escobero@yelmocines.es>, Laura Lopez
+	<laura_lopez@yelmocines.es>, Daniel Martinez Blay
+	<daniel_martinez@yelmocines.es>, Jose Rafael Bueno Rodriguez
+	<rafael_bueno@yelmocines.es>, Eduardo Garrido
+	<eduardo_garrido@yelmocines.es>, Cesar Riquelme
+	<cesar_riquelme@yelmocines.es>, Jose Ignacio Rodriguez
+	<joseignacio_rodriguez@yelmocines.es>
+Subject: Embajadores/as del Valor
+Thread-Topic: Embajadores/as del Valor
+Thread-Index: AQHb334pdbp0R05EU0ykG8KfxKxoWw==
+Date: Tue, 17 Jun 2025 11:54:35 +0000
+Message-ID:
+	<SN7PR18MB382470C9E5CD3D0936748EFBD073A@SN7PR18MB3824.namprd18.prod.outlook.com>
+Accept-Language: es-ES, en-US
+Content-Language: es-ES
+X-MS-Exchange-Organization-AuthAs: Internal
+X-MS-Exchange-Organization-AuthMechanism: 04
+X-MS-Exchange-Organization-AuthSource: SN7PR18MB3824.namprd18.prod.outlook.com
+X-MS-Exchange-Organization-SupervisoryReview-OcrResultLocation:
+X-MS-Has-Attach: yes
+X-Auto-Response-Suppress: DR, OOF, AutoReply
+X-MS-Exchange-Organization-Network-Message-Id:
+	85270d05-daee-4893-c391-08ddad95bb1c
+X-MS-Exchange-Organization-SCL: 1
+X-MS-TNEF-Correlator:
+X-MS-Exchange-Organization-RecordReviewCfmType: 0
+msip_labels:
+x-ms-publictraffictype: Email
+authentication-results: dkim=none (message not signed)
+ header.d=none;dmarc=none action=none header.from=yelmocines.es;
+x-ms-office365-filtering-correlation-id: 85270d05-daee-4893-c391-08ddad95bb1c
+x-ms-traffictypediagnostic:
+	SN7PR18MB3824:EE_|DS4PPFE99134494:EE_|MN0PR18MB5997:EE_
+x-forefront-antispam-report:
+	CIP:255.255.255.255;CTRY:;LANG:es;SCL:1;SRV:;IPV:NLI;SFV:NSPM;H:SN7PR18MB3824.namprd18.prod.outlook.com;PTR:;CAT:NONE;SFS:(13230040)(31052699007)(39142699007)(366016)(8096899003)(41050700001);DIR:INT;
+x-microsoft-antispam:
+	BCL:0;ARA:13230040|31052699007|39142699007|366016|8096899003|41050700001;
+x-ms-exchange-crosstenant-network-message-id:
+	85270d05-daee-4893-c391-08ddad95bb1c
+x-ms-exchange-crosstenant-originalarrivaltime: 17 Jun 2025 11:54:35.7215 (UTC)
+x-ms-exchange-crosstenant-fromentityheader: Hosted
+x-ms-exchange-crosstenant-id: d95b8428-3729-4ecd-a6f3-beee9ba8c6cb
+x-ms-exchange-crosstenant-mailboxtype: HOSTED
+x-ms-exchange-crosstenant-userprincipalname:
+	BwkENnhfAXJfM/P6q2d/nmqGAJz4VMhD+/F3r7OqyeZgERQt+XOD/oJm657hJ5RP2Xp1EKb+DWtDI/s3LDAV7xrUhCDRuafxxtJr94xf3NvHBs61tRpauop+QwBmXmv8
+x-ms-exchange-transport-crosstenantheadersstamped: DS4PPFE99134494
+x-ms-exchange-atpmessageproperties: SA|SL
+x-ms-exchange-transport-endtoendlatency: 00:00:04.4132717
+x-ms-exchange-processed-by-bccfoldering: 15.20.8835.025
+x-ms-exchange-crosstenant-authas: Internal
+x-ms-exchange-crosstenant-authsource: SN7PR18MB3824.namprd18.prod.outlook.com
+X-Microsoft-Antispam-Mailbox-Delivery:
+	ucf:0;jmr:0;auth:0;dest:I;ENG:(910005)(920097)(425001)(930097)(140003)(1420198);
+X-Microsoft-Antispam-Message-Info:
+	K/C/yBbNpIFtUs918OYAxPvag8nvKzT35WbZnsC5S9iRIQGvnimYLl+AiXpkUgEJ316wXFFWQRxMWzkOyh2Apv7u/chnvVW6YSQBFTZCosHS1Tt4Jf081vY5knsTTW6vxVh3+vMgEzKsAiFLSBAa5qTQFVN1VArKllzr3pSzxGhNWqb5awRIVJ2aWtT1j5Vb+8llUWwG4BJVJFS3AvnuIWrZenlxXlOE18etydrbOsdOHHb2hPxqFDX5PoVuREmP1ThomI9YEvOKglsBBkOJf7sKBzlJyjaEuOdWic+/nbGmu9v2tjTh7n1vPYSZ7rMOclfbWrrr24nBHCZtQDVz8C8K5xX2a1rutFWT7mWUQrkE+B2gJPWZlNb1S+JnWhBlc9QoZ0u6Sm5ZTs2ZMITa3fKRCQIOpRQ27RDl9b4EAAj/1KLdpTBbdfCqdous1DHTRatyvYWV7QRFQ8kheJgJhUUleASeOiXibQ8Atn/IIjYZfnn+/s++VeY1KU0me/wSNNZY2ro9TO5T8WL7unzuEFv5h2bydiecC9MIsh34v+dQOTAxeDE60Z2n3fg7nSvnKOfbDITS19kwMuIT+UDFnwwU3Rapy5MK783Q68PeuDa1D8vJ1zKCAid0PDRY7lVGb8Db+2TCA0DRazaCbC9HnkosrTs4ZPoAik4LKi2GC4cH/cJHpe/dhPYraI75k+fi934svl2iRL6Sf9tyaga2V0x8egH0ZTi0X6YKSiO6YX8fB8thh8X9V1Mqqp94I49CihpT9nUP0bvtKkk8KROL9jXWC8IoTxnuSLja7bQXLHo=
+Content-Type: multipart/related;
+	boundary="_004_SN7PR18MB382470C9E5CD3D0936748EFBD073ASN7PR18MB3824namp_";
+	type="multipart/alternative"
+MIME-Version: 1.0
+
+--_004_SN7PR18MB382470C9E5CD3D0936748EFBD073ASN7PR18MB3824namp_
+Content-Type: multipart/alternative;
+	boundary="_000_SN7PR18MB382470C9E5CD3D0936748EFBD073ASN7PR18MB3824namp_"
+
+--_000_SN7PR18MB382470C9E5CD3D0936748EFBD073ASN7PR18MB3824namp_
+Content-Type: text/plain; charset="iso-8859-1"
+Content-Transfer-Encoding: quoted-printable
+
+Muy buenos d=EDas!
+
+Como adelantamos ayer, nos alegra anunciar que del 17 al 29 de junio estar=
+=E1 activa la fase de votaci=F3n del programa Embajadores del Valor, una in=
+iciativa para reconocer a aquellas personas que representan de forma excepc=
+ional los valores de Cine Yelmo.
+
+=BFC=F3mo funciona?
+
+Se entregar=E1n 5 insignias, una por cada valor del programa:
+
+  *
+Ser palomita
+  *
+Pasi=F3n por los resultados
+  *
+Vocaci=F3n de servicio
+  *
+Compromiso
+  *
+Integridad
+
+Todas las personas que integran los equipos operativos y gerencias podr=E1n=
+ votar a una persona de vuestro cine por cada valor a trav=E9s de un formul=
+ario FORMS que estar=E1 habilitado durante estas 2 semanas.
+
+La persona con m=E1s votos por cada valor recibir=E1 la insignia correspond=
+iente y la portar=E1 hasta la siguiente votaci=F3n.
+
+Una misma persona puede recibir m=E1s de una insignia, si as=ED lo reflejan=
+ los votos.
+
+En caso de empate, ser=E1 el Gerente del cine quien decida qui=E9n llevar=
+=E1 la insignia.
+
+En el formulario, las personas deben incluir su c=F3digo de empleado e indi=
+car nombre y apellido completos de las personas que van a votar.
+
+Es importante animar, durante la TOMA 1, a la realizaci=F3n de este FORMS<h=
+ttps://nam04.safelinks.protection.outlook.com/?url=3Dhttps%3A%2F%2Fforms.of=
+fice.com%2FPages%2FResponsePage.aspx%3Fid%3DKIRb2Sk3zU6m877um6jGy19Ec8PSVpJ=
+LklUYE4FFZbNUM0g5UkVGVTNETkhYR0xKVEJMSDlLNDRRSi4u&data=3D05%7C02%7Clos_prad=
+os%40yelmocines.es%7C85270d05daee4893c39108ddad95bb1c%7Cd95b842837294ecda6f=
+3beee9ba8c6cb%7C0%7C0%7C638857580805063155%7CUnknown%7CTWFpbGZsb3d8eyJFbXB0=
+eU1hcGkiOnRydWUsIlYiOiIwLjAuMDAwMCIsIlAiOiJXaW4zMiIsIkFOIjoiTWFpbCIsIldUIjo=
+yfQ%3D%3D%7C0%7C%7C%7C&sdata=3DOUbOQrxul3haDJOxGRgupGyXvMK80R3WAyaDN7lruCQ%=
+3D&reserved=3D0>.
+
+Muchas gracias por impulsar una cultura de reconocimiento y orgullo en nues=
+tros equipos.
+
+Ante cualquier duda contacta con tu BP @laura_lopez o @Miguel Escobero.
+
+Estamos a vuestra disposici=F3n para cualquier cuesti=F3n.
+
+Un saludo,
+
+
+[cid:70f7381b-b26e-452b-880a-94640701dcfd]
+Desarrollo Organizacional
+
+Cine Yelmo I Cin=E9polis Espa=F1a
+
+Esta informaci=F3n es de uso exclusivamente interno para colaboradores de C=
+in=E9polis (incluidas sus afiliadas y subsidiarias). Queda prohibida su rep=
+roducci=F3n total o parcial, traducci=F3n, divulgaci=F3n, distribuci=F3n, m=
+anipulaci=F3n y en general cualquier acci=F3n que atente contra la confiden=
+cialidad de la misma. La divulgaci=F3n sin autorizaci=F3n, en cualquier med=
+io comercial incluyendo de forma enunciativa y no limitativa redes sociales=
+ queda prohibida. En caso de que usted haya recibido por alg=FAn medio esta=
+ informaci=F3n y no sea un colaborador le pedimos hacer caso omiso a esta y=
+ eliminarlo. Este mensaje contiene o puede contener informaci=F3n confidenc=
+ial. Cualquier uso no autorizado est=E1 prohibido.
+
+--_000_SN7PR18MB382470C9E5CD3D0936748EFBD073ASN7PR18MB3824namp_
+Content-Type: text/html; charset="iso-8859-1"
+Content-Transfer-Encoding: quoted-printable
+
+<html>
+<head>
+<meta http-equiv=3D"Content-Type" content=3D"text/html; charset=3Diso-8859-=
+1">
+<style type=3D"text/css" style=3D"display:none;"> P {margin-top:0;margin-bo=
+ttom:0;} </style>
+</head>
+<body dir=3D"ltr">
+<div class=3D"elementToProof" style=3D"text-align: left; text-indent: 0px; =
+margin: 0px; font-family: Aptos, Aptos_EmbeddedFont, Aptos_MSFontService, C=
+alibri, Helvetica, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);">
+Muy buenos d=EDas!</div>
+<div style=3D"text-align: left; text-indent: 0px; margin: 0px; font-family:=
+ Aptos, Aptos_EmbeddedFont, Aptos_MSFontService, Calibri, Helvetica, sans-s=
+erif; font-size: 12pt; color: rgb(0, 0, 0);">
+<br>
+</div>
+<div style=3D"text-align: left; text-indent: 0px; margin: 0px; font-family:=
+ Aptos, Aptos_EmbeddedFont, Aptos_MSFontService, Calibri, Helvetica, sans-s=
+erif; font-size: 12pt; color: rgb(0, 0, 0);">
+Como adelantamos ayer, nos alegra anunciar que <b>del 17 al 29 de junio</b>=
+&nbsp;estar=E1 activa la fase de votaci=F3n del
+<b>programa Embajadores del Valor</b>, una iniciativa para reconocer a aque=
+llas personas que representan de forma excepcional los
+<b>valores de Cine Yelmo.</b></div>
+<div style=3D"text-align: left; text-indent: 0px; margin: 0px; font-family:=
+ Aptos, Aptos_EmbeddedFont, Aptos_MSFontService, Calibri, Helvetica, sans-s=
+erif; font-size: 12pt; color: rgb(0, 0, 0);">
+<br>
+</div>
+<div style=3D"text-align: left; text-indent: 0px; margin: 0px; font-family:=
+ Aptos, Aptos_EmbeddedFont, Aptos_MSFontService, Calibri, Helvetica, sans-s=
+erif; font-size: 12pt; color: rgb(0, 0, 0);">
+=BFC=F3mo funciona?</div>
+<div style=3D"text-align: left; text-indent: 0px; margin: 0px; font-family:=
+ Aptos, Aptos_EmbeddedFont, Aptos_MSFontService, Calibri, Helvetica, sans-s=
+erif; font-size: 12pt; color: rgb(0, 0, 0);">
+<br>
+</div>
+<div style=3D"text-align: left; text-indent: 0px; margin: 0px; font-family:=
+ Aptos, Aptos_EmbeddedFont, Aptos_MSFontService, Calibri, Helvetica, sans-s=
+erif; font-size: 12pt; color: rgb(0, 0, 0);">
+Se entregar=E1n 5 insignias, una por cada valor del programa:</div>
+<ul data-editing-info=3D"{&quot;applyListStyleFromLevel&quot;:true}" style=
+=3D"text-align: left; margin-top: 0px; margin-bottom: 0px; list-style-type:=
+ disc;">
+<li style=3D"font-family: Aptos, Aptos_EmbeddedFont, Aptos_MSFontService, C=
+alibri, Helvetica, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);">
+<div role=3D"presentation" style=3D"margin: 0px;">Ser palomita</div>
+</li><li style=3D"font-family: Aptos, Aptos_EmbeddedFont, Aptos_MSFontServi=
+ce, Calibri, Helvetica, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);">
+<div role=3D"presentation" style=3D"margin: 0px;">Pasi=F3n por los resultad=
+os</div>
+</li><li style=3D"font-family: Aptos, Aptos_EmbeddedFont, Aptos_MSFontServi=
+ce, Calibri, Helvetica, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);">
+<div role=3D"presentation" style=3D"margin: 0px;">Vocaci=F3n de servicio</d=
+iv>
+</li><li style=3D"font-family: Aptos, Aptos_EmbeddedFont, Aptos_MSFontServi=
+ce, Calibri, Helvetica, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);">
+<div role=3D"presentation" style=3D"margin: 0px;">Compromiso</div>
+</li><li style=3D"font-family: Aptos, Aptos_EmbeddedFont, Aptos_MSFontServi=
+ce, Calibri, Helvetica, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);">
+<div role=3D"presentation" style=3D"margin: 0px;">Integridad</div>
+</li></ul>
+<div style=3D"text-align: left; text-indent: 0px; margin: 0px; font-family:=
+ Aptos, Aptos_EmbeddedFont, Aptos_MSFontService, Calibri, Helvetica, sans-s=
+erif; font-size: 12pt; color: rgb(0, 0, 0);">
+<br>
+</div>
+<div style=3D"text-align: left; text-indent: 0px; margin: 0px; font-family:=
+ Aptos, Aptos_EmbeddedFont, Aptos_MSFontService, Calibri, Helvetica, sans-s=
+erif; font-size: 12pt; color: rgb(0, 0, 0);">
+Todas las personas que integran los equipos operativos y gerencias podr=E1n=
+ votar a una persona de vuestro cine por cada valor a trav=E9s de un formul=
+ario FORMS que estar=E1 habilitado durante estas 2 semanas.</div>
+<div style=3D"text-align: left; text-indent: 0px; margin: 0px; font-family:=
+ Aptos, Aptos_EmbeddedFont, Aptos_MSFontService, Calibri, Helvetica, sans-s=
+erif; font-size: 12pt; color: rgb(0, 0, 0);">
+<br>
+</div>
+<div style=3D"text-align: left; text-indent: 0px; margin: 0px; font-family:=
+ Aptos, Aptos_EmbeddedFont, Aptos_MSFontService, Calibri, Helvetica, sans-s=
+erif; font-size: 12pt; color: rgb(0, 0, 0);">
+La persona con <b>m=E1s votos por cada valor recibir=E1 la insignia</b>&nbs=
+p;correspondiente y la portar=E1 hasta la siguiente votaci=F3n.</div>
+<div style=3D"text-align: left; text-indent: 0px; margin: 0px; font-family:=
+ Aptos, Aptos_EmbeddedFont, Aptos_MSFontService, Calibri, Helvetica, sans-s=
+erif; font-size: 12pt; color: rgb(0, 0, 0);">
+<br>
+</div>
+<div style=3D"text-align: left; text-indent: 0px; margin: 0px; font-family:=
+ Aptos, Aptos_EmbeddedFont, Aptos_MSFontService, Calibri, Helvetica, sans-s=
+erif; font-size: 12pt; color: rgb(0, 0, 0);">
+Una misma persona puede recibir m=E1s de una insignia, si as=ED lo reflejan=
+ los votos.</div>
+<div style=3D"text-align: left; text-indent: 0px; margin: 0px; font-family:=
+ Aptos, Aptos_EmbeddedFont, Aptos_MSFontService, Calibri, Helvetica, sans-s=
+erif; font-size: 12pt; color: rgb(0, 0, 0);">
+<br>
+</div>
+<div style=3D"text-align: left; text-indent: 0px; margin: 0px; font-family:=
+ Aptos, Aptos_EmbeddedFont, Aptos_MSFontService, Calibri, Helvetica, sans-s=
+erif; font-size: 12pt; color: rgb(0, 0, 0);">
+En caso de empate, ser=E1 el Gerente del cine quien decida qui=E9n llevar=
+=E1 la insignia.</div>
+<div style=3D"text-align: left; text-indent: 0px; margin: 0px; font-family:=
+ Aptos, Aptos_EmbeddedFont, Aptos_MSFontService, Calibri, Helvetica, sans-s=
+erif; font-size: 12pt; color: rgb(0, 0, 0);">
+<br>
+</div>
+<div style=3D"text-align: left; text-indent: 0px; margin: 0px; font-family:=
+ Aptos, Aptos_EmbeddedFont, Aptos_MSFontService, Calibri, Helvetica, sans-s=
+erif; font-size: 12pt; color: rgb(0, 0, 0);">
+En el formulario, las personas deben incluir su c=F3digo de empleado e indi=
+car nombre y apellido completos de las personas que van a votar.</div>
+<div style=3D"text-align: left; text-indent: 0px; margin: 0px; font-family:=
+ Aptos, Aptos_EmbeddedFont, Aptos_MSFontService, Calibri, Helvetica, sans-s=
+erif; font-size: 12pt; color: rgb(0, 0, 0);">
+<br>
+</div>
+<div style=3D"text-align: left; text-indent: 0px; margin: 0px; font-family:=
+ Aptos, Aptos_EmbeddedFont, Aptos_MSFontService, Calibri, Helvetica, sans-s=
+erif; font-size: 12pt; color: rgb(0, 0, 0);">
+Es importante animar, <b>durante la TOMA 1</b>, a la realizaci=F3n de este =
+<a href=3D"https://nam04.safelinks.protection.outlook.com/?url=3Dhttps%3A%2=
+F%2Fforms.office.com%2FPages%2FResponsePage.aspx%3Fid%3DKIRb2Sk3zU6m877um6j=
+Gy19Ec8PSVpJLklUYE4FFZbNUM0g5UkVGVTNETkhYR0xKVEJMSDlLNDRRSi4u&amp;data=3D05=
+%7C02%7Clos_prados%40yelmocines.es%7C85270d05daee4893c39108ddad95bb1c%7Cd95=
+b842837294ecda6f3beee9ba8c6cb%7C0%7C0%7C638857580805063155%7CUnknown%7CTWFp=
+bGZsb3d8eyJFbXB0eU1hcGkiOnRydWUsIlYiOiIwLjAuMDAwMCIsIlAiOiJXaW4zMiIsIkFOIjo=
+iTWFpbCIsIldUIjoyfQ%3D%3D%7C0%7C%7C%7C&amp;sdata=3DOUbOQrxul3haDJOxGRgupGyX=
+vMK80R3WAyaDN7lruCQ%3D&amp;reserved=3D0" originalsrc=3D"https://forms.offic=
+e.com/Pages/ResponsePage.aspx?id=3DKIRb2Sk3zU6m877um6jGy19Ec8PSVpJLklUYE4FF=
+ZbNUM0g5UkVGVTNETkhYR0xKVEJMSDlLNDRRSi4u" id=3D"OWA7f9d16d2-5894-610e-94d3-=
+2b151e713e71" class=3D"OWAAutoLink" title=3D"https://forms.office.com/Pages=
+/ResponsePage.aspx?id=3DKIRb2Sk3zU6m877um6jGy19Ec8PSVpJLklUYE4FFZbNUM0g5UkV=
+GVTNETkhYR0xKVEJMSDlLNDRRSi4u" style=3D"margin: 0px;">
+FORMS</a>.</div>
+<div style=3D"text-align: left; text-indent: 0px; margin: 0px; font-family:=
+ Aptos, Aptos_EmbeddedFont, Aptos_MSFontService, Calibri, Helvetica, sans-s=
+erif; font-size: 12pt; color: rgb(0, 0, 0);">
+<br>
+</div>
+<div style=3D"text-align: left; text-indent: 0px; margin: 0px; font-family:=
+ Aptos, Aptos_EmbeddedFont, Aptos_MSFontService, Calibri, Helvetica, sans-s=
+erif; font-size: 12pt; color: rgb(0, 0, 0);">
+Muchas gracias por impulsar una cultura de reconocimiento y orgullo en nues=
+tros equipos.</div>
+<div style=3D"text-align: left; text-indent: 0px; margin: 0px; font-family:=
+ Aptos, Aptos_EmbeddedFont, Aptos_MSFontService, Calibri, Helvetica, sans-s=
+erif; font-size: 12pt; color: rgb(0, 0, 0);">
+<br>
+</div>
+<div style=3D"text-align: left; text-indent: 0px; margin: 0px; font-family:=
+ Aptos, Aptos_EmbeddedFont, Aptos_MSFontService, Calibri, Helvetica, sans-s=
+erif; font-size: 12pt; color: rgb(0, 0, 0);">
+Ante cualquier duda contacta con tu BP @laura_lopez o @Miguel Escobero.</di=
+v>
+<div style=3D"text-align: left; text-indent: 0px; margin: 0px; font-family:=
+ Aptos, Aptos_EmbeddedFont, Aptos_MSFontService, Calibri, Helvetica, sans-s=
+erif; font-size: 12pt; color: rgb(0, 0, 0);">
+<br>
+</div>
+<div style=3D"text-align: left; text-indent: 0px; margin: 0px; font-family:=
+ Aptos, Aptos_EmbeddedFont, Aptos_MSFontService, Calibri, Helvetica, sans-s=
+erif; font-size: 12pt; color: rgb(0, 0, 0);">
+Estamos a vuestra disposici=F3n para cualquier cuesti=F3n.</div>
+<div style=3D"text-align: left; text-indent: 0px; margin: 0px; font-family:=
+ Aptos, Aptos_EmbeddedFont, Aptos_MSFontService, Calibri, Helvetica, sans-s=
+erif; font-size: 12pt; color: rgb(0, 0, 0);">
+<br>
+</div>
+<div class=3D"elementToProof" style=3D"text-align: left; text-indent: 0px; =
+margin: 0px; font-family: Aptos, Aptos_EmbeddedFont, Aptos_MSFontService, C=
+alibri, Helvetica, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);">
+Un saludo,</div>
+<div id=3D"Signature">
+<div style=3D"font-family: Aptos, Aptos_EmbeddedFont, Aptos_MSFontService, =
+Calibri, Helvetica, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);">
+<br>
+</div>
+<p style=3D"text-align: left; text-indent: 0px; background-color: rgb(255, =
+255, 255); margin: 0px;">
+<span style=3D"font-family: &quot;Segoe UI Web (West European)&quot;, &quot=
+;Segoe UI&quot;, -apple-system, BlinkMacSystemFont, Roboto, &quot;Helvetica=
+ Neue&quot;, sans-serif; font-size: 12pt; color: rgb(0, 0, 0);"><img id=3D"=
+x_image_0" width=3D"51" height=3D"61" style=3D"width: 51px; height: 61px; m=
+ax-width: 363px; min-width: auto; min-height: auto; margin: 0px;" data-outl=
+ook-trace=3D"F:2|T:2" src=3D"cid:70f7381b-b26e-452b-880a-94640701dcfd"><br>
+</span><span style=3D"font-family: &quot;Segoe UI Web (West European)&quot;=
+, &quot;Segoe UI&quot;, -apple-system, BlinkMacSystemFont, Roboto, &quot;He=
+lvetica Neue&quot;, sans-serif; font-size: 12pt; color: black; background-c=
+olor: white;"><b>Desarrollo Organizacional&nbsp;</b></span></p>
+<p style=3D"text-align: left; text-indent: 0px; background-color: rgb(255, =
+255, 255); margin: 0px;">
+<span style=3D"font-family: &quot;Segoe UI Web (West European)&quot;, &quot=
+;Segoe UI&quot;, -apple-system, BlinkMacSystemFont, Roboto, &quot;Helvetica=
+ Neue&quot;, sans-serif; font-size: 12pt; color: black;">Cine Yelmo I Cin=
+=E9polis Espa=F1a</span></p>
+<p style=3D"text-align: left; text-indent: 0px; background-color: rgb(255, =
+255, 255); margin: 0px;">
+<span style=3D"font-family: &quot;TT Norms Light&quot;; font-size: 9pt; col=
+or: rgb(51, 51, 51); background-color: white;"><i>Esta informaci=F3n es de =
+uso exclusivamente interno para colaboradores de Cin=E9polis</i></span><spa=
+n style=3D"font-family: &quot;Segoe UI Web (West European)&quot;, &quot;Seg=
+oe UI&quot;, -apple-system, BlinkMacSystemFont, Roboto, &quot;Helvetica Neu=
+e&quot;, sans-serif; font-size: 9pt; color: rgb(51, 51, 51); background-col=
+or: white;">&nbsp;</span><span style=3D"font-family: &quot;TT Norms Light&q=
+uot;; font-size: 9pt; color: rgb(51, 51, 51); background-color: white;"><i>=
+(incluidas
+ sus afiliadas y subsidiarias). Queda prohibida su reproducci=F3n total o p=
+arcial, traducci=F3n, divulgaci=F3n, distribuci=F3n, manipulaci=F3n y en ge=
+neral cualquier acci=F3n que atente contra la confidencialidad de la misma.=
+ La divulgaci=F3n sin autorizaci=F3n, en cualquier
+ medio comercial incluyendo de forma enunciativa y no limitativa redes soci=
+ales queda prohibida. En caso de que usted haya recibido por alg=FAn medio =
+esta informaci=F3n y no sea un colaborador le pedimos hacer caso omiso a es=
+ta y eliminarlo. Este mensaje contiene
+ o puede contener informaci=F3n confidencial. Cualquier uso no autorizado e=
+st=E1 prohibido.</i></span></p>
+</div>
+</body>
+</html>
+
+--_000_SN7PR18MB382470C9E5CD3D0936748EFBD073ASN7PR18MB3824namp_--
+
+--_004_SN7PR18MB382470C9E5CD3D0936748EFBD073ASN7PR18MB3824namp_
+Content-Type: image/png; name="Outlook-vtnewynl.png"
+Content-Description: Outlook-vtnewynl.png
+Content-Disposition: inline; filename="Outlook-vtnewynl.png"; size=2094;
+	creation-date="Tue, 17 Jun 2025 11:54:35 GMT";
+	modification-date="Tue, 17 Jun 2025 11:54:40 GMT"
+Content-ID: <70f7381b-b26e-452b-880a-94640701dcfd>
+Content-Transfer-Encoding: base64
+
+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
+
+--_004_SN7PR18MB382470C9E5CD3D0936748EFBD073ASN7PR18MB3824namp_--

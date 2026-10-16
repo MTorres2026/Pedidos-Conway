@@ -1,11 +1,11 @@
 {
   "pedido": {
-    "orderId": "FLOW-1792167499649",
+    "orderId": "FLOW-1792185922693",
     "fechaInforme": "01/09/2026",
-    "timestamp": 1792167499649,
+    "timestamp": 1792185922693,
     "estado": "CONFIRMADO_POR_ENCARGADA",
-    "totalLineas": 7,
-    "totalGranel": 2,
+    "totalLineas": 10,
+    "totalGranel": 4,
     "fechaRecepcion": "16/10/2026"
   },
   "lineas": [
@@ -52,6 +52,54 @@
       "idConway": "347885",
       "denominacionLargaConway": "SAZONADOR CHEDDAR 10X1KG",
       "presentacion": "Caja 10 Kilos",
+      "unidadesPorCajaPack": "10",
+      "unidadPedidoFlow": "CAJA",
+      "fuente": "STOCKABLE_MODIFICADO",
+      "notaRegla": "Mapeo actualizado"
+    },
+    {
+      "descripcion": "Carton Infantil Palomitas 85 gr",
+      "codigo": "1001010011",
+      "unidad": "GAZ",
+      "cantidadPedida": 3,
+      "idVista": 22,
+      "idErp": "1001010011",
+      "umErp": "GAZ",
+      "idConway": "23148",
+      "denominacionLargaConway": "CARTON MENU INFANTIL",
+      "presentacion": "Caja 300 Piezas",
+      "unidadesPorCajaPack": "300",
+      "unidadPedidoFlow": "CAJA",
+      "fuente": "STOCKABLE_MODIFICADO",
+      "notaRegla": "Producto verificado/usable. El hecho de no aparecer individualmente en Mapeo Actualizado no implica que no exista. No inventar ID ERP/UM. | Enriquecido con Mapeo Actualizado.xlsx: ID Conway/denominación/presentación cuando existe."
+    },
+    {
+      "descripcion": "Aceite Girasol",
+      "codigo": "1001010001",
+      "unidad": "GAN",
+      "cantidadPedida": 4,
+      "idVista": 4,
+      "idErp": "1001010001",
+      "umErp": "GAN",
+      "idConway": "402391",
+      "denominacionLargaConway": "ACEITE GIRASOL 3*5LT",
+      "presentacion": "Caja 15 Litros",
+      "unidadesPorCajaPack": "3",
+      "unidadPedidoFlow": "CAJA",
+      "fuente": "STOCKABLE_MODIFICADO",
+      "notaRegla": "Producto verificado/usable. El hecho de no aparecer individualmente en Mapeo Actualizado no implica que no exista. No inventar ID ERP/UM. | Enriquecido con Mapeo Actualizado.xlsx: ID Conway/denominación/presentación cuando existe."
+    },
+    {
+      "descripcion": "Sazonador Doritos",
+      "codigo": "1001010019",
+      "unidad": "HAE",
+      "cantidadPedida": 3,
+      "idVista": 9423,
+      "idErp": "1001010019",
+      "umErp": "HAE",
+      "idConway": "393111",
+      "denominacionLargaConway": "SABORIZANTE DORITOS 1KG",
+      "presentacion": "Caja 10 Kgs",
       "unidadesPorCajaPack": "10",
       "unidadPedidoFlow": "CAJA",
       "fuente": "STOCKABLE_MODIFICADO",
@@ -126,8 +174,8 @@
       "codigo": "1001050004",
       "idArticulo": "1001050004",
       "unidad": "GAD",
-      "cantidadPedida": 3,
-      "cantidad": 3,
+      "cantidadPedida": 2,
+      "cantidad": 2,
       "origen": "granel",
       "familiaGranel": "GOMA",
       "pendienteCodigo": false,
@@ -138,10 +186,34 @@
       "codigo": "1001050004",
       "idArticulo": "1001050004",
       "unidad": "GAE",
-      "cantidadPedida": 3,
-      "cantidad": 3,
+      "cantidadPedida": 2,
+      "cantidad": 2,
       "origen": "granel",
       "familiaGranel": "GOMA",
+      "pendienteCodigo": false,
+      "fuente": "GRANEL"
+    },
+    {
+      "descripcion": "Caserio Caramelo Piones Bolsa 1 Kilo",
+      "codigo": "1001050001",
+      "idArticulo": "1001050001",
+      "unidad": "HBL",
+      "cantidadPedida": 2,
+      "cantidad": 2,
+      "origen": "granel",
+      "familiaGranel": "CARAMELO",
+      "pendienteCodigo": false,
+      "fuente": "GRANEL"
+    },
+    {
+      "descripcion": "Respiral Limon Bolsa 1 Kilo",
+      "codigo": "1001050001",
+      "idArticulo": "1001050001",
+      "unidad": "HBR",
+      "cantidadPedida": 2,
+      "cantidad": 2,
+      "origen": "granel",
+      "familiaGranel": "CARAMELO",
       "pendienteCodigo": false,
       "fuente": "GRANEL"
     }
@@ -152,20 +224,40 @@
       "nombreCorto": "Goma Granel 1Kg Ositos Oro Azu",
       "descripcionCompleta": "Goma Granel 1Kg Ositos Oro Azucar",
       "categoria": "GOMA",
-      "cantidad": 3,
+      "cantidad": 2,
       "descripcion": "Goma Granel 1Kg Ositos Oro Azu",
       "unidad": "GAD",
-      "cantidadPedida": 3
+      "cantidadPedida": 2
     },
     {
       "um": "GAE",
       "nombreCorto": "Goma Granel 1Kg.Huevos",
       "descripcionCompleta": "Goma Granel 1Kg.Huevos",
       "categoria": "GOMA",
-      "cantidad": 3,
+      "cantidad": 2,
       "descripcion": "Goma Granel 1Kg.Huevos",
       "unidad": "GAE",
-      "cantidadPedida": 3
+      "cantidadPedida": 2
+    },
+    {
+      "um": "HBL",
+      "nombreCorto": "Caserio Caramelo Piones Bolsa",
+      "descripcionCompleta": "Caserio Caramelo Piones Bolsa 1 Kilo",
+      "categoria": "CARAMELO",
+      "cantidad": 2,
+      "descripcion": "Caserio Caramelo Piones Bolsa",
+      "unidad": "HBL",
+      "cantidadPedida": 2
+    },
+    {
+      "um": "HBR",
+      "nombreCorto": "Respiral Limon Bolsa 1 Kilo",
+      "descripcionCompleta": "Respiral Limon Bolsa 1 Kilo",
+      "categoria": "CARAMELO",
+      "cantidad": 2,
+      "descripcion": "Respiral Limon Bolsa 1 Kilo",
+      "unidad": "HBR",
+      "cantidadPedida": 2
     }
   ]
 }

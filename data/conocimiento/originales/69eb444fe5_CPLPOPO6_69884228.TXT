@@ -1,0 +1,39 @@
+VERSION CPLPOPO6 17-Octubre-23 17:33
+Inic Job:10-MAR-2026 05:19:26.000000_PM
+ 
+Dpch Ped
+ 
+Get-PO-Header
+      $Create_PO_Output ....... <Y>
+      &VNDLOC.DISP_CO_FLAG .... < >
+      &BU_PM.DISP_CO_BU_FLG ... <Y>
+      $dispmethod ............. <EML>
+DATOS_VENDOR - Business Unit: SP001
+DATOS_VENDOR - PO_ID: 0000407128
+FileName: C:\psoft\psftcarga\ocmx\pdf\SP001_0000407128_25025014_CONWAY-THE CONVENIENCE COMPANY SA.PDF
+$emailfile:C:\psoft\psftcarga\ocmx\pdf\SP001_0000407128_25025014_CONWAY-THE CONVENIENCE COMPANY SA.PDF
+antes de la impresión
+25025014 - Y. Los Prados
+Inserta en PS_CPLPO_POSTML_TB
+Inserta en PS_PO_DISPATCHED
+Get-PO-Header
+      $Create_PO_Output ....... <Y>
+      &VNDLOC.DISP_CO_FLAG .... < >
+      &BU_PM.DISP_CO_BU_FLG ... <Y>
+      $dispmethod ............. <EML>
+DATOS_VENDOR - Business Unit: SP001
+DATOS_VENDOR - PO_ID: 0000407140
+FileName: C:\psoft\psftcarga\ocmx\pdf\SP001_0000407140_25025014_COCA COLA EUROPACIFIC PARTNERS IBERIA SL.PDF
+$emailfile:C:\psoft\psftcarga\ocmx\pdf\SP001_0000407140_25025014_COCA COLA EUROPACIFIC PARTNERS IBERIA SL.PDF
+antes de la impresión
+25025014 - Y. Los Prados
+antes de la impresión
+25025014 - Y. Los Prados
+antes de la impresión
+25025014 - Y. Los Prados
+Inserta en PS_CPLPO_POSTML_TB
+Inserta en PS_PO_DISPATCHED
+Nº Total de Pedidos Proc: 0002
+ 
+Fin de Job:10-MAR-2026 05:19:34.000000_PM
+End-of-File
