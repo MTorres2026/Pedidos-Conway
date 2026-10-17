@@ -47,11 +47,12 @@ ICONOS_TIPO = {
     "xlsx": "📗",
     "texto": "📄",
     "zip": "🗜",
+    "imagen": "🖼",
 }
 
 FILTRO_ARCHIVOS = (
     "Correos y documentos (*.eml *.pdf *.pptx *.docx *.xlsx *.txt *.md "
-    "*.csv *.html *.htm *.zip);;Todos los archivos (*.*)"
+    "*.csv *.html *.htm *.zip *.png *.jpg *.jpeg);;Todos los archivos (*.*)"
 )
 
 MAX_VISTA_PREVIA = 30000
@@ -81,8 +82,14 @@ class Conocimiento(QWidget):
         fila_alta = QHBoxLayout()
         self.boton_archivos = QPushButton("➕ Añadir correos / documentos…")
         self.boton_carpeta = QPushButton("📁 Añadir carpeta…")
+        self.boton_releer = QPushButton("🔄 Releer todo (con imágenes)")
+        self.boton_releer.setToolTip(
+            "Vuelve a leer los documentos ya guardados, incluido el texto de las "
+            "capturas de imagen. Puede tardar varios minutos."
+        )
         fila_alta.addWidget(self.boton_archivos)
         fila_alta.addWidget(self.boton_carpeta)
+        fila_alta.addWidget(self.boton_releer)
         fila_alta.addStretch()
         layout.addLayout(fila_alta)
 
@@ -100,7 +107,7 @@ class Conocimiento(QWidget):
         layout.addLayout(fila_busqueda)
 
         # ----- Lista + vista previa -----
-        divisor = QSplitter(Qt.Horizontal)
+        divisor = QSplitter(Qt.Orientation.Horizontal)
         self.lista = QListWidget()
         self.vista = QTextBrowser()
         self.vista.setOpenLinks(False)
@@ -132,6 +139,7 @@ class Conocimiento(QWidget):
         # ----- Conexiones -----
         self.boton_archivos.clicked.connect(self.elegir_archivos)
         self.boton_carpeta.clicked.connect(self.elegir_carpeta)
+        self.boton_releer.clicked.connect(self.releer_todo)
         self.boton_buscar.clicked.connect(self.refrescar)
         self.caja_busqueda.returnPressed.connect(self.refrescar)
         self.combo_filtro.currentIndexChanged.connect(self.refrescar)
@@ -154,7 +162,7 @@ class Conocimiento(QWidget):
     # ------------------------------------------------------------------
     def _doc_actual_id(self):
         item = self.lista.currentItem()
-        return item.data(Qt.UserRole) if item is not None else None
+        return item.data(Qt.ItemDataRole.UserRole) if item is not None else None
 
     def refrescar(self, *_):
         seleccionado = self._doc_actual_id()
@@ -182,7 +190,7 @@ class Conocimiento(QWidget):
             if r.remitente:
                 linea2 += f"  ·  {r.remitente[:40]}"
             item = QListWidgetItem(f"{estrella}{icono} {r.titulo}\n    {linea2}")
-            item.setData(Qt.UserRole, r.id)
+            item.setData(Qt.ItemDataRole.UserRole, r.id)
             self.lista.addItem(item)
             if r.id == seleccionado:
                 fila_a_elegir = i
@@ -200,6 +208,7 @@ class Conocimiento(QWidget):
             f"({est['correos']} correos, {est['documentos']} documentos"
             f"{', ' + str(est['archivados']) + ' archivados' if est['archivados'] else ''})"
             f"  ·  Mostrando {self.lista.count()}"
+            f"  ·  Lectura de imágenes: {self.biblioteca.ocr_nombre or 'no instalada'}"
         )
 
     def _mensaje_vacio(self, consulta):
@@ -220,7 +229,7 @@ class Conocimiento(QWidget):
     def mostrar_seleccion(self, actual, _anterior):
         if actual is None:
             return
-        ficha = self.biblioteca.obtener(actual.data(Qt.UserRole))
+        ficha = self.biblioteca.obtener(actual.data(Qt.ItemDataRole.UserRole))
         if not ficha:
             return
 
@@ -294,16 +303,16 @@ class Conocimiento(QWidget):
                            0)
 
     def _importar(self, accion, total_estimado):
-        dialogo = QProgressDialog("Añadiendo…", "Cancelar", 0, max(total_estimado, 0), self)
+        dialogo = QProgressDialog("Procesando…", "Cancelar", 0, max(total_estimado, 0), self)
         dialogo.setWindowTitle("Conocimiento")
-        dialogo.setWindowModality(Qt.WindowModal)
+        dialogo.setWindowModality(Qt.WindowModality.WindowModal)
         dialogo.setMinimumDuration(0)
 
         def progreso(hechos, total, nombre):
             dialogo.setMaximum(max(total, 1))
             dialogo.setValue(hechos)
             if nombre:
-                dialogo.setLabelText(f"Añadiendo {hechos + 1} de {total}:\n{nombre}")
+                dialogo.setLabelText(f"Procesando {hechos + 1} de {total}:\n{nombre}")
             QApplication.processEvents()
             return not dialogo.wasCanceled()
 
@@ -320,8 +329,8 @@ class Conocimiento(QWidget):
         fallos = [r for r in resultados if not r.ok]
 
         mensaje = (
-            f"Añadidos: {len(nuevos)}\n"
-            f"Ya estaban: {len(repetidos)}\n"
+            f"Nuevos o actualizados: {len(nuevos)}\n"
+            f"Sin cambios / ya estaban: {len(repetidos)}\n"
             f"Con problemas: {len(fallos)}"
         )
         if fallos:
@@ -333,6 +342,27 @@ class Conocimiento(QWidget):
         QMessageBox.information(self, "Conocimiento", mensaje)
 
         self.refrescar()
+
+    def releer_todo(self):
+        if self.biblioteca.ocr_nombre is None:
+            QMessageBox.information(
+                self,
+                "Conocimiento",
+                "Aún no está instalada la lectura de imágenes.\n\n"
+                "En la consola de WinPython ejecuta una vez:\n"
+                "pip install rapidocr-onnxruntime\n\n"
+                "Después cierra y abre CineStock y pulsa este botón otra vez.",
+            )
+            return
+        respuesta = QMessageBox.question(
+            self,
+            "Releer todo",
+            "Se volverán a leer todos los documentos guardados, incluido el texto "
+            "de las imágenes. Puede tardar varios minutos. ¿Continuar?",
+        )
+        if respuesta != QMessageBox.StandardButton.Yes:
+            return
+        self._importar(lambda progreso: self.biblioteca.reprocesar_todo(progreso), 0)
 
     # ------------------------------------------------------------------
     # Acciones
@@ -376,6 +406,6 @@ class Conocimiento(QWidget):
             f"¿Quitar «{ficha['titulo']}» de la biblioteca?\n\n"
             "Se borra la copia guardada aquí; tu archivo original no se toca.",
         )
-        if respuesta == QMessageBox.Yes:
+        if respuesta == QMessageBox.StandardButton.Yes:
             self.biblioteca.eliminar(doc_id)
             self.refrescar()

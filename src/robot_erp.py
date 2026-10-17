@@ -231,6 +231,16 @@ def _modal_en_contexto(driver, nivel=0):
             c = _boton_cancelar(driver)
             if c:
                 driver.execute_script("arguments[0].click();", c)
+
+                # Vigilar el ID PEDIDO que aparece cuando la persona pulsa Guardar en el ERP
+                # (solo lee la pantalla; lo anota en data/registro_pedidos.db).
+                if args.auto and driver is not None:
+                    try:
+                        from robot_id_pedido import vigilar_id_pedido
+                        vigilar_id_pedido(driver, ruta)
+                    except Exception as e:
+                        print(f"[aviso] No se pudo vigilar el ID de pedido: {e}")        
+                
                 # CORREGIDO: antes ponía "(texto or '')[:|u]", sintaxis inválida.
                 return "(consulta cerrada) " + (texto or "")[:200]
         finally:

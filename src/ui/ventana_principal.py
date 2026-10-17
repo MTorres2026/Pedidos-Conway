@@ -15,6 +15,7 @@ from ui.configuracion import Configuracion
 from ui.conocimiento import Conocimiento
 from ui.catalogo import Catalogo
 from pathlib import Path
+from ui.registro_pedidos import RegistroPedidosDialog
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 
@@ -41,6 +42,7 @@ class VentanaPrincipal(QMainWindow):
         self.menu.addItem("📊 Historial")       # Índice 2
         self.menu.addItem("⚙️ Configuración")   # Índice 3
         self.menu.addItem("📚 Conocimiento")
+        self.menu.addItem("🔖 Registro de pedidos")
         
         self.menu.addItem("📖 Catálogo")        # Índice 4
 
@@ -94,6 +96,15 @@ class VentanaPrincipal(QMainWindow):
          self.conocimiento.show()
          return
 
+        if fila == 5:
+            self.inicio.hide()
+            self.pedidos.hide()
+            self.configuracion.hide()
+            dialogo = RegistroPedidosDialog(self)
+            dialogo.exec()
+            self.menu.setCurrentRow(0)
+            return
+
         # Gestionar la selección del menú lateral
         if fila == 0:
             self.inicio.show()
@@ -111,5 +122,5 @@ class VentanaPrincipal(QMainWindow):
         elif fila == 3:
             self.configuracion.actualizar()
             self.configuracion.show()
-        elif fila == 5:
+        elif fila == 6:
             self.catalogo.show()

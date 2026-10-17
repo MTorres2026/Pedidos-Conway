@@ -22,11 +22,14 @@ import hashlib
 import html
 import math
 import re
+import os
 import shutil
 import sqlite3
+import subprocess
 import tempfile
 import unicodedata
 import zipfile
+from io import BytesIO
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from email import policy
@@ -45,7 +48,10 @@ from xml.etree import ElementTree as ET
 EXTENSIONES_SOPORTADAS = (
     ".eml", ".pdf", ".pptx", ".docx", ".xlsx",
     ".txt", ".md", ".csv", ".html", ".htm", ".zip",
+    ".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp",
 )
+
+EXTENSIONES_IMAGEN = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp")
 
 EXTENSIONES_ANTIGUAS = {
     ".ppt": ".pptx", ".doc": ".docx", ".xls": ".xlsx", ".msg": ".eml",
@@ -373,11 +379,169 @@ def _texto_pdf(ruta: Path) -> str:
     return "\n".join(partes)
 
 
+# ----------------------------------------------------------------------
+# Lectura de texto en imágenes (OCR) - opcional
+# ----------------------------------------------------------------------
+
+OCR_INSTALACION = (
+    "Para leer el texto de las imágenes instala una vez (en la consola de "
+    "WinPython): pip install rapidocr-onnxruntime"
+)
+MIN_BYTES_IMAGEN = 15_000        # por debajo suelen ser logos / iconos
+MIN_LADO_IMAGEN = (200, 100)     # ancho, alto mínimos si Pillow está instalado
+MAX_IMAGENES_POR_CORREO = 15
+MAX_PAGINAS_PDF_OCR = 10
+
+
+def _imagen_merece_ocr(datos: bytes) -> bool:
+    if len(datos) < MIN_BYTES_IMAGEN:
+        return False
+    try:
+        from PIL import Image
+        with Image.open(BytesIO(datos)) as im:
+            return im.width >= MIN_LADO_IMAGEN[0] and im.height >= MIN_LADO_IMAGEN[1]
+    except ImportError:
+        return True
+    except Exception:
+        return False
+
+
+def _buscar_tesseract() -> Optional[str]:
+    exe = shutil.which("tesseract")
+    if exe:
+        return exe
+    for candidato in (
+        r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+        r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
+    ):
+        if Path(candidato).exists():
+            return candidato
+    return None
+
+
+class _MotorOcr:
+    """
+    Motor de OCR perezoso. Orden de preferencia:
+      1) RapidOCR  (pip install rapidocr-onnxruntime; no necesita instalar nada más)
+      2) Tesseract (programa externo, si está instalado)
+    Si no hay ninguno, disponible() es False y la biblioteca funciona igual
+    que antes (sin leer imágenes).
+    """
+
+    def __init__(self):
+        self.nombre: Optional[str] = None
+        self._probado = False
+        self._rapid = None
+        self._tess: Optional[str] = None
+        self._idiomas: Optional[str] = None
+
+    def disponible(self) -> bool:
+        if not self._probado:
+            self._probado = True
+            try:
+                from rapidocr_onnxruntime import RapidOCR  # type: ignore
+                self._rapid = RapidOCR()
+                self.nombre = "RapidOCR"
+                return True
+            except Exception:
+                self._rapid = None
+            exe = _buscar_tesseract()
+            if exe:
+                self._tess = exe
+                self._idiomas = self._elegir_idiomas(exe)
+                self.nombre = "Tesseract"
+        return self.nombre is not None
+
+    @staticmethod
+    def _flags():
+        return getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
+
+    def _elegir_idiomas(self, exe: str) -> Optional[str]:
+        try:
+            salida = subprocess.run(
+                [exe, "--list-langs"], capture_output=True, text=True,
+                timeout=20, creationflags=self._flags(),
+            ).stdout.split()
+        except Exception:
+            return None
+        if "spa" in salida and "eng" in salida:
+            return "spa+eng"
+        if "spa" in salida:
+            return "spa"
+        if "eng" in salida:
+            return "eng"
+        return None
+
+    def leer(self, datos: bytes) -> str:
+        if not self.disponible():
+            raise FaltaLibreria(OCR_INSTALACION)
+        if self._rapid is not None:
+            try:
+                resultado, _ = self._rapid(datos)
+            except Exception:
+                import numpy as np
+                from PIL import Image
+                resultado, _ = self._rapid(np.array(Image.open(BytesIO(datos)).convert("RGB")))
+            lineas = [r[1] for r in (resultado or []) if float(r[2]) >= 0.5]
+            return "\n".join(lineas)
+        return self._leer_tesseract(datos)
+
+    def _leer_tesseract(self, datos: bytes) -> str:
+        with tempfile.TemporaryDirectory() as tmp:
+            img = Path(tmp) / "i.png"
+            try:
+                from PIL import Image
+                with Image.open(BytesIO(datos)) as im:
+                    im = im.convert("RGB")
+                    if im.width < 1400:  # ampliar mejora la lectura de capturas
+                        factor = 2 if im.width >= 700 else 3
+                        im = im.resize((im.width * factor, im.height * factor))
+                    im.save(img, format="PNG")
+            except Exception:
+                img.write_bytes(datos)
+            cmd = [self._tess, str(img), "stdout", "--psm", "6"]
+            if self._idiomas:
+                cmd += ["-l", self._idiomas]
+            r = subprocess.run(
+                cmd, capture_output=True, timeout=90,
+                creationflags=self._flags(),
+            )
+            return r.stdout.decode("utf-8", errors="replace")
+
+
+def _texto_imagen(ruta: Path, ocr) -> str:
+    if ocr is None:
+        raise FaltaLibreria(OCR_INSTALACION)
+    datos = ruta.read_bytes()
+    if not _imagen_merece_ocr(datos):
+        return ""
+    return ocr(datos) or ""
+
+
+def _ocr_pdf_escaneado(ruta: Path, ocr) -> str:
+    """OCR de las primeras páginas de un PDF sin texto (necesita pypdfium2)."""
+    try:
+        import pypdfium2 as pdfium  # type: ignore
+    except ImportError:
+        return ""
+    try:
+        pdf = pdfium.PdfDocument(str(ruta))
+        partes = []
+        for i in range(min(len(pdf), MAX_PAGINAS_PDF_OCR)):
+            imagen = pdf[i].render(scale=2).to_pil()
+            buf = BytesIO()
+            imagen.save(buf, format="PNG")
+            partes.append(ocr(buf.getvalue()) or "")
+        return "\n".join(partes)
+    except Exception:
+        return ""
+
+
 MAX_ZIP_ARCHIVOS = 100
 MAX_ZIP_BYTES = 200 * 1024 * 1024
 
 
-def _texto_zip(ruta: Path) -> str:
+def _texto_zip(ruta: Path, ocr=None) -> str:
     """
     Lee los documentos de dentro de un .zip (un solo nivel). Nunca extrae a
     carpetas del usuario: cada archivo se lee en memoria y se pasa por un
@@ -402,17 +566,21 @@ def _texto_zip(ruta: Path) -> str:
                 try:
                     destino = Path(tmp) / f"z{n}{ext}"
                     destino.write_bytes(z.read(info))
-                    texto = extraer_texto(destino)
-                    partes.append(f"[Archivo: {nombre}]\n{texto}")
+                    texto = extraer_texto(destino, ocr)
+                    if texto.strip() or ext not in EXTENSIONES_IMAGEN:
+                        partes.append(f"[Archivo: {nombre}]\n{texto}")
                 except FaltaLibreria:
-                    partes.append(f"[Archivo: {nombre}] (falta pypdf para leerlo)")
+                    partes.append(f"[Archivo: {nombre}] (falta una librería para leerlo)")
                 except Exception:
                     partes.append(f"[Archivo: {nombre}] (no se pudo leer)")
     return "\n\n".join(partes)
 
 
-def extraer_texto(ruta: Path) -> str:
-    """Texto de un documento (no correo). Lanza FaltaLibreria o ValueError."""
+def extraer_texto(ruta: Path, ocr=None) -> str:
+    """
+    Texto de un documento (no correo). Lanza FaltaLibreria o ValueError.
+    ocr: función bytes->str (o None si no hay OCR instalado).
+    """
     ext = ruta.suffix.lower()
     try:
         if ext == ".docx":
@@ -423,8 +591,14 @@ def extraer_texto(ruta: Path) -> str:
             texto = _texto_xlsx(ruta)
         elif ext == ".pdf":
             texto = _texto_pdf(ruta)
+            if len(texto.strip()) < 50 and ocr is not None:
+                extra = _ocr_pdf_escaneado(ruta, ocr)
+                if extra.strip():
+                    texto = extra
         elif ext == ".zip":
-            texto = _texto_zip(ruta)
+            texto = _texto_zip(ruta, ocr)
+        elif ext in EXTENSIONES_IMAGEN:
+            texto = _texto_imagen(ruta, ocr)
         elif ext in (".html", ".htm"):
             texto = _html_a_texto(_leer_texto_plano(ruta))
         elif ext in (".txt", ".md", ".csv"):
@@ -465,7 +639,7 @@ def _fecha_iso(valor) -> str:
         return ""
 
 
-def _leer_correo(ruta: Path) -> _Correo:
+def _leer_correo(ruta: Path, ocr=None) -> _Correo:
     with open(ruta, "rb") as f:
         msg = BytesParser(policy=policy.default).parse(f)
 
@@ -501,11 +675,23 @@ def _leer_correo(ruta: Path) -> _Correo:
     textos_adjuntos: List[str] = []
     n_adjuntos = 0
     with tempfile.TemporaryDirectory() as tmp:
+        n_imagenes = 0
         for adj in msg.iter_attachments():
             nombre = adj.get_filename()
-            if not nombre:
-                continue
             if adj.get_content_maintype() == "image":
+                # Capturas dentro del correo: se leen con OCR (si está instalado).
+                if ocr is not None and n_imagenes < MAX_IMAGENES_POR_CORREO:
+                    try:
+                        datos = adj.get_payload(decode=True) or b""
+                        if _imagen_merece_ocr(datos):
+                            n_imagenes += 1
+                            t = (ocr(datos) or "").strip()
+                            if t:
+                                textos_adjuntos.append(f"[Imagen: {nombre or 'sin nombre'}]\n{t}")
+                    except Exception:
+                        pass
+                continue
+            if not nombre:
                 continue
             n_adjuntos += 1
             ext = Path(nombre).suffix.lower()
@@ -516,7 +702,7 @@ def _leer_correo(ruta: Path) -> _Correo:
                 datos = adj.get_payload(decode=True) or b""
                 destino = Path(tmp) / f"adj_{n_adjuntos}{ext}"
                 destino.write_bytes(datos)
-                t = extraer_texto(destino)
+                t = extraer_texto(destino, ocr)
                 textos_adjuntos.append(f"[Adjunto: {nombre}]\n{t}")
             except Exception:
                 textos_adjuntos.append(f"[Adjunto: {nombre}] (no se pudo leer)")
@@ -651,6 +837,10 @@ CREATE TABLE IF NOT EXISTS docs (
     estado        TEXT NOT NULL DEFAULT 'NORMAL'
 );
 CREATE INDEX IF NOT EXISTS idx_docs_hilo ON docs(hilo);
+CREATE TABLE IF NOT EXISTS ocr_cache (
+    hash  TEXT PRIMARY KEY,
+    texto TEXT NOT NULL
+);
 """
 
 
@@ -670,6 +860,7 @@ class Biblioteca:
         self._con.executescript(_ESQUEMA)
         self._fts = self._crear_fts()
         self._con.commit()
+        self._motor_ocr = _MotorOcr()
 
     # ---------------- infraestructura ----------------
 
@@ -688,6 +879,36 @@ class Biblioteca:
                 continue
         return False
 
+    @property
+    def ocr_nombre(self) -> Optional[str]:
+        """'RapidOCR', 'Tesseract' o None si no hay lectura de imágenes."""
+        self._motor_ocr.disponible()
+        return self._motor_ocr.nombre
+
+    def _ocr_callable(self):
+        if not self._motor_ocr.disponible():
+            return None
+
+        def leer(datos: bytes) -> str:
+            h = hashlib.sha256(datos).hexdigest()
+            fila = self._con.execute(
+                "SELECT texto FROM ocr_cache WHERE hash=?", (h,)
+            ).fetchone()
+            if fila:
+                return fila["texto"]
+            try:
+                texto = _limpiar(self._motor_ocr.leer(datos))
+            except Exception:
+                return ""  # un fallo no se guarda en la caché
+            self._con.execute(
+                "INSERT OR REPLACE INTO ocr_cache (hash, texto) VALUES (?,?)",
+                (h, texto),
+            )
+            self._con.commit()
+            return texto
+
+        return leer
+
     def cerrar(self) -> None:
         try:
             self._con.close()
@@ -695,6 +916,81 @@ class Biblioteca:
             pass
 
     # ---------------- altas ----------------
+
+    def _leer_documento(self, ruta: Path, ocr) -> Dict:
+        """Lee un archivo y devuelve sus campos (sin tocar la base de datos)."""
+        ext = ruta.suffix.lower()
+        if ext == ".eml":
+            correo = _leer_correo(ruta, ocr)
+            return dict(
+                tipo="correo",
+                titulo=correo.asunto
+                or re.sub(r"[_\s]+", " ", ruta.stem).strip() or "(sin asunto)",
+                texto=correo.texto,
+                remitente=correo.remitente,
+                destinatarios=correo.destinatarios,
+                fecha=correo.fecha,
+                adjuntos=correo.adjuntos,
+                base_clave=("mid:" + correo.message_id.lower()
+                            if correo.message_id else None),
+                hilo=hilo_de(correo.asunto),
+            )
+        texto = extraer_texto(ruta, ocr)
+        tipo = ext.lstrip(".")
+        if tipo in ("md", "csv", "htm", "html"):
+            tipo = "texto"
+        elif ext in EXTENSIONES_IMAGEN:
+            tipo = "imagen"
+        return dict(
+            tipo=tipo, titulo=ruta.stem, texto=texto, remitente="",
+            destinatarios="",
+            fecha=datetime.fromtimestamp(ruta.stat().st_mtime).date().isoformat(),
+            adjuntos=0, base_clave=None, hilo="",
+        )
+
+    def reprocesar(self, doc_id: int) -> ResultadoAlta:
+        """Vuelve a leer un documento ya guardado (p. ej. tras instalar OCR)."""
+        f = self._con.execute("SELECT * FROM docs WHERE id=?", (doc_id,)).fetchone()
+        if not f:
+            return ResultadoAlta(False, "No existe en la biblioteca.")
+        ruta = Path(f["ruta_copia"])
+        if not ruta.is_file():
+            return ResultadoAlta(False, "Falta la copia original guardada.", f["archivo"])
+        try:
+            d = self._leer_documento(ruta, self._ocr_callable())
+        except Exception as e:
+            return ResultadoAlta(False, f"No se pudo leer: {e}", f["archivo"])
+        texto = d["texto"]
+        if texto == f["texto"] and d["adjuntos"] == f["adjuntos"]:
+            return ResultadoAlta(True, "Sin cambios.", f["archivo"], duplicado=True, id=doc_id)
+        categoria = categorizar(f["titulo"], texto)
+        self._con.execute(
+            "UPDATE docs SET texto=?, adjuntos=?, categoria=? WHERE id=?",
+            (texto, d["adjuntos"], categoria, doc_id),
+        )
+        if self._fts:
+            self._con.execute("DELETE FROM docs_fts WHERE rowid=?", (doc_id,))
+            meta = f"{f['remitente']} {f['destinatarios']} {f['archivo']} {categoria}"
+            self._con.execute(
+                "INSERT INTO docs_fts (rowid, titulo, texto, meta) VALUES (?,?,?,?)",
+                (doc_id, f["titulo"], texto, meta),
+            )
+        self._recalcular_hilo(f["hilo"])
+        self._con.commit()
+        return ResultadoAlta(True, "Actualizado.", f["archivo"], id=doc_id)
+
+    def reprocesar_todo(self, progreso=None) -> List[ResultadoAlta]:
+        ids = [r["id"] for r in self._con.execute("SELECT id FROM docs ORDER BY id")]
+        resultados: List[ResultadoAlta] = []
+        for i, doc_id in enumerate(ids):
+            if progreso is not None:
+                ficha = self.obtener(doc_id)
+                if progreso(i, len(ids), ficha["archivo"] if ficha else "") is False:
+                    break
+            resultados.append(self.reprocesar(doc_id))
+        if progreso is not None:
+            progreso(len(resultados), len(ids), "")
+        return resultados
 
     def agregar_archivo(self, ruta) -> ResultadoAlta:
         ruta = Path(ruta)
@@ -715,37 +1011,18 @@ class Biblioteca:
             return ResultadoAlta(False, f"Formato no soportado ({ext}).", nombre)
 
         try:
-            if ext == ".eml":
-                correo = _leer_correo(ruta)
-                tipo = "correo"
-                titulo = correo.asunto or re.sub(r"[_\s]+", " ", ruta.stem).strip() or "(sin asunto)"
-                texto = correo.texto
-                remitente = correo.remitente
-                destinatarios = correo.destinatarios
-                fecha = correo.fecha
-                adjuntos = correo.adjuntos
-                base_clave = (
-                    "mid:" + correo.message_id.lower()
-                    if correo.message_id else None
-                )
-                hilo = hilo_de(correo.asunto)
-            else:
-                texto = extraer_texto(ruta)
-                tipo = ext.lstrip(".")
-                if tipo in ("md", "csv", "htm", "html"):
-                    tipo = "texto"
-                titulo = ruta.stem
-                remitente = destinatarios = ""
-                fecha = datetime.fromtimestamp(ruta.stat().st_mtime).date().isoformat()
-                adjuntos = 0
-                base_clave = None
-                hilo = ""
+            d = self._leer_documento(ruta, self._ocr_callable())
         except FaltaLibreria as e:
             return ResultadoAlta(False, str(e), nombre)
         except ValueError as e:
             return ResultadoAlta(False, str(e), nombre)
         except Exception as e:
             return ResultadoAlta(False, f"No se pudo leer: {e}", nombre)
+
+        tipo, titulo, texto = d["tipo"], d["titulo"], d["texto"]
+        remitente, destinatarios = d["remitente"], d["destinatarios"]
+        fecha, adjuntos = d["fecha"], d["adjuntos"]
+        base_clave, hilo = d["base_clave"], d["hilo"]
 
         if base_clave is None:
             base_clave = "file:" + hashlib.sha256(ruta.read_bytes()).hexdigest()
@@ -762,7 +1039,7 @@ class Biblioteca:
 
         aviso = ""
         if not texto.strip():
-            aviso = " (sin texto legible: ¿PDF escaneado o vacío?)"
+            aviso = " (sin texto legible: ¿PDF escaneado o vacío?)" if tipo != "imagen" else " (no se encontró texto en la imagen)"
             texto = ""
 
         segura = re.sub(r"[^\w.\- ]", "_", nombre)[:120]
