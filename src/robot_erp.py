@@ -1805,22 +1805,30 @@ def main():
     except Exception as e:
         inf.fatal = f"Error inesperado: {resumen_error(e)}"
         print(f"\n¡{inf.fatal}")
+        
     if inf.hay_errores:
         guardar_informe(inf, driver)
         print("\n" + inf.texto())
-        mostrar_ventana("Pedido ERP - Revisión necesaria", inf.texto(), error=True)
-    else:
-        txt = (f"Las {len(datos)} líneas se han cargado y verificado en pantalla sin incidencias.\n\n"
-               "Revisa el pedido y pulsa Guardar tú mismo (el programa NO guarda).\n"
-               "Chrome se queda abierto: no lo cierres hasta haber guardado.")
-        print("\n" + txt)
-        mostrar_ventana("Pedido ERP - Carga finalizada", txt, error=False)
         
-    # --- AQUÍ ESTÁ EL VIGILANTE EN SU SITIO CORRECTO ---
+        txt_error = (f"Se han cargado {len(datos) - len(inf.lineas)} líneas. Hay {len(inf.lineas)} incidencias.\n\n"
+                     "👉 IMPORTANTE: Ve a Chrome, revisa las líneas marcadas en el informe, corrígelas a mano y pulsa GUARDAR en el ERP.\n\n"
+                     "NO CIERRES ESTA VENTANA NI LA CONSOLA NEGRA. El robot se quedará esperando en segundo plano para leer el ID de Solicitud automáticamente en cuanto pulses Guardar.")
+        mostrar_ventana("Pedido ERP - Revisión necesaria", txt_error, error=True)
+    else:
+        txt_ok = (f"¡Las {len(datos)} líneas se han cargado correctamente!\n\n"
+                  "👉 PULSA 'GUARDAR' EN EL ERP AHORA.\n\n"
+                  "NO CIERRES ESTA VENTANA NI LA CONSOLA NEGRA. El robot se quedará esperando en segundo plano para leer el ID de Solicitud automáticamente en cuanto pulses Guardar, y lo anotará en tu Registro de Pedidos.")
+        print("\n" + txt_ok)
+        mostrar_ventana("Pedido ERP - Carga finalizada", txt_ok, error=False)
+        
+    # --- VIGILANTE EN SU SITIO CORRECTO ---
     if args.auto and driver is not None and not inf.fatal:
         try:
             from robot_id_pedido import vigilar_id_pedido
-            print("\nEsperando a que el humano pulse GUARDAR en el ERP para leer el ID...")
+            print("\n" + "="*60)
+            print(" 🕵️‍♂️ ESPERANDO A QUE PULSES GUARDAR EN EL ERP...")
+            print(" (Deja esta ventana abierta. El robot leerá el ID solo)")
+            print("="*60 + "\n")
             # 'ruta' aquí SÍ existe (la del cargar_datos)
             vigilar_id_pedido(driver, ruta)
         except Exception as e:
@@ -1831,7 +1839,7 @@ def main():
     if not args.auto:
         input("Pulsa Enter para cerrar esta consola (Chrome seguirá abierto)...")
     else:
-        print("Modo --auto: no se espera a pulsar Enter. Chrome queda abierto para revisar y guardar.")
+        print("Modo --auto: Chrome queda abierto. Vigilante finalizado.")
 
 
 if __name__ == "__main__":
