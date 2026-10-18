@@ -8,10 +8,12 @@ import io
 import json
 import sys
 import re
-import glob  # <--- Importante para buscar los duplicados
+import os
+import glob
 from pathlib import Path
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime
+
 # Que imprimir nunca rompa el receptor (consola de Windows o sin consola)
 if sys.stdout is None:
     sys.stdout = io.StringIO()
@@ -154,6 +156,9 @@ def extraer_lineas_granel(pdf_bytes):
 # ============================================================
 
 class CineStockRequestHandler(BaseHTTPRequestHandler):
+    
+    # --- FIX 1: Timeout para que una conexión lenta no bloquee el servidor ---
+    timeout = 30
 
     def enviar_json(self, codigo_http, respuesta):
         cuerpo = json.dumps(respuesta, ensure_ascii=False).encode("utf-8")
@@ -181,7 +186,10 @@ class CineStockRequestHandler(BaseHTTPRequestHandler):
         fecha_informe = str(datos_pedido.get("fechaInforme", ""))
         timestamp = datos_pedido.get("timestamp")
 
-        PEDIDO_ACTUAL.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        # --- FIX 5: Escritura atómica para pedido_actual.json ---
+        tmp_actual = PEDIDO_ACTUAL.with_suffix(".json.tmp")
+        tmp_actual.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp_actual, PEDIDO_ACTUAL)
 
         try:
             if timestamp:
@@ -199,7 +207,10 @@ class CineStockRequestHandler(BaseHTTPRequestHandler):
             nombre_historial = f"{fecha_archivo.strftime('%Y%m%d_%H%M%S_%f')}_pedido_{order_id}.json"
             archivo_historial = HISTORIAL_DIR / nombre_historial
 
-        archivo_historial.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        # --- FIX 6: Escritura atómica para el historial ---
+        tmp_historial = archivo_historial.with_suffix(".json.tmp")
+        tmp_historial.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp_historial, archivo_historial)
 
         return order_id, fecha_informe, fecha_archivo, archivo_historial
 
@@ -233,7 +244,10 @@ class CineStockRequestHandler(BaseHTTPRequestHandler):
             if not parte or parte.startswith(b"--"):
                 continue
 
-            parte = parte.lstrip(b"\r\n").rstrip(b"\r\n")
+            # --- FIX 3: Arreglo para que no corrompa los PDFs ---
+            if parte.startswith(b"\r\n"): parte = parte[2:]
+            if parte.endswith(b"\r\n"): parte = parte[:-2]
+            
             if not parte:
                 continue
 
@@ -347,8 +361,18 @@ class CineStockRequestHandler(BaseHTTPRequestHandler):
             self.enviar_json(400, {"ok": False, "error": "Falta Content-Length"})
             return
 
+        # --- FIX 2: Límite de tamaño para no reventar la RAM ---
+        MAX_BODY = 30 * 1024 * 1024  # 30 MB
         try:
             length = int(content_length)
+            if length <= 0 or length > MAX_BODY:
+                self.enviar_json(413, {"ok": False, "error": "Pedido demasiado grande"})
+                return
+        except ValueError:
+            self.enviar_json(400, {"ok": False, "error": "Content-Length inválido"})
+            return
+
+        try:
             raw_body = self.rfile.read(length)
             content_type = self.headers.get("Content-Type", "")
 
@@ -363,7 +387,7 @@ class CineStockRequestHandler(BaseHTTPRequestHandler):
                 data = json.loads(raw_body.decode("utf-8"))
 
             # =================================================
-            # AQUÍ ESTÁ EL CHECK DE DUPLICADOS (AHORA SÍ BIEN)
+            # CHECK DE DUPLICADOS
             # =================================================
             order_id_recibido = str(data.get("pedido", {}).get("orderId", ""))
             if order_id_recibido:
@@ -407,8 +431,10 @@ class CineStockRequestHandler(BaseHTTPRequestHandler):
             print()
             sys.stdout.flush()
 
+            # --- FIX 4: Añadimos "duplicado": False en la respuesta de éxito ---
             self.enviar_json(200, {
                 "ok": True,
+                "duplicado": False,
                 "pdfRecibido": archivo_pdf is not None,
                 "pdfGranelRecibido": archivo_pdf_granel is not None,
                 "lineasGranel": len(data.get("lineas", [])) or 0
