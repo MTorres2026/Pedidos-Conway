@@ -231,17 +231,6 @@ def _modal_en_contexto(driver, nivel=0):
             c = _boton_cancelar(driver)
             if c:
                 driver.execute_script("arguments[0].click();", c)
-
-                # Vigilar el ID PEDIDO que aparece cuando la persona pulsa Guardar en el ERP
-                # (solo lee la pantalla; lo anota en data/registro_pedidos.db).
-                if args.auto and driver is not None:
-                    try:
-                        from robot_id_pedido import vigilar_id_pedido
-                        vigilar_id_pedido(driver, ruta)
-                    except Exception as e:
-                        print(f"[aviso] No se pudo vigilar el ID de pedido: {e}")        
-                
-                # CORREGIDO: antes ponía "(texto or '')[:|u]", sintaxis inválida.
                 return "(consulta cerrada) " + (texto or "")[:200]
         finally:
             _subir_frame(driver)
@@ -399,8 +388,6 @@ _PATRONES_FATALES = [
     "no tiene acceso", "acceso denegado", "unauthorized", "forbidden",
     "must log in", "debe iniciar sesión", "debe iniciar sesion", "reinicie sesión", "reinicie sesion",
 ]
-# CORREGIDO: antes "401"/"403" se buscaban como subcadena y cualquier mensaje con
-# esos dígitos (p. ej. un código de artículo 4010...) paraba toda la carga como "fatal".
 _RE_HTTP_FATAL = re.compile(r"\b(?:http|error|código|codigo|code|status)\D{0,3}(?:401|403)\b")
 
 
@@ -684,7 +671,6 @@ def mostrar_ventana(titulo, texto, error=True):
         marco.pack(fill="both", expand=True, padx=8, pady=8)
         sb = tk.Scrollbar(marco)
         sb.pack(side="right", fill="y")
-        # CORREGIDO: "\\n" era una cadena de dos caracteres, no un salto de línea.
         txt = tk.Text(marco, width=115, height=min(30, max(10, texto.count("\n") + 2)),
                       wrap="word", font=("Consolas", 10), yscrollcommand=sb.set)
         txt.pack(side="left", fill="both", expand=True)
@@ -713,7 +699,6 @@ def mostrar_ventana(titulo, texto, error=True):
         ctypes.windll.user32.MessageBoxW(0, texto[:3000], titulo, (0x30 if error else 0x40) | 0x1000)
         return "windows"
     except Exception:
-        # CORREGIDO: "\\n" era una cadena de dos caracteres, no un salto de línea.
         print("\n" + "=" * 70 + f"\n{titulo}\n" + "=" * 70 + f"\n{texto}\n")
         return "consola"
 
@@ -1267,7 +1252,6 @@ def cargar_lineas(driver, wait, datos, inf):
         try:
             procesar_fila(driver, i, fila, inf, n_pantalla)
             if inf.fatal:
-                # CORREGIDO: la fila en la que ocurrió el error fatal no quedaba reflejada en el informe.
                 if (i + 1) not in inf.lineas:
                     inf.linea(*_datos_linea(datos, i), "Línea en la que se detuvo el programa (revísala)")
                 _marcar_pendientes(inf, datos, i + 1, "No se llegó a procesar (error fatal anterior)")
@@ -1801,7 +1785,7 @@ def main():
         time.sleep(1)
     inf = Informe(len(datos))
     driver = None
-    fase = {"txt": "Abrir Chrome"}  # CORREGIDO: faltaba la llave de cierre.
+    fase = {"txt": "Abrir Chrome"}
     try:
         driver = crear_driver()
         wait = WebDriverWait(driver, 20)
@@ -1831,6 +1815,18 @@ def main():
                "Chrome se queda abierto: no lo cierres hasta haber guardado.")
         print("\n" + txt)
         mostrar_ventana("Pedido ERP - Carga finalizada", txt, error=False)
+        
+    # --- AQUÍ ESTÁ EL VIGILANTE EN SU SITIO CORRECTO ---
+    if args.auto and driver is not None and not inf.fatal:
+        try:
+            from robot_id_pedido import vigilar_id_pedido
+            print("\nEsperando a que el humano pulse GUARDAR en el ERP para leer el ID...")
+            # 'ruta' aquí SÍ existe (la del cargar_datos)
+            vigilar_id_pedido(driver, ruta)
+        except Exception as e:
+            print(f"[aviso] No se pudo vigilar el ID de pedido: {e}")
+    # ---------------------------------------------------
+
     # CORREGIDO: antes se hacía driver.quit() aquí, cerrando Chrome y perdiendo el pedido sin guardar.
     if not args.auto:
         input("Pulsa Enter para cerrar esta consola (Chrome seguirá abierto)...")
