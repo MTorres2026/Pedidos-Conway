@@ -371,7 +371,7 @@ class CineStockRequestHandler(BaseHTTPRequestHandler):
                 if archivos_existentes:
                     print(f"[AVISO] El pedido {order_id_recibido} ya existe. Ignorando duplicado.")
                     sys.stdout.flush()
-                    self.enviar_json(200, {"ok": True, "mensaje": "Pedido ya recibido previamente (ignorado)."})
+                    self.enviar_json(200, {"ok": True, "duplicado": True, "mensaje": "Pedido ya recibido previamente (ignorado)."})
                     return
             # =================================================
 
