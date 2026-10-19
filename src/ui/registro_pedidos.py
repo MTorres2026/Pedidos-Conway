@@ -277,6 +277,10 @@ class RegistroPedidosDialog(QDialog):
         self.tabla = QTableWidget()
         self.tabla.setColumnCount(len(COLUMNAS))
         self.tabla.setHorizontalHeaderLabels(COLUMNAS)
+        
+        # --- NUEVO: Centrar las cabeceras de la tabla ---
+        self.tabla.horizontalHeader().setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)
+        
         self.tabla.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.tabla.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -374,6 +378,10 @@ class RegistroPedidosDialog(QDialog):
             ]
             for c, valor in enumerate(valores):
                 item = QTableWidgetItem(valor)
+                
+                # --- NUEVO: Centrar el texto de las celdas ---
+                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                
                 if c == 0:
                     item.setData(Qt.ItemDataRole.UserRole, f["order_id"])
                     if f["id_solicitud"] or f["id_pedido"]:

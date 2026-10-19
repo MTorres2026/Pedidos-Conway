@@ -46,9 +46,6 @@ class VisorPDFDialog(QDialog):
         self.documento = QPdfDocument(self)
 
          # Cargamos el documento
-        # CORREGIDO: en PySide6 el miembro del enum es QPdfDocument.Error.None_
-        # (con barra baja), no "NoError". Además: si load() falla, se muestra
-        # solo el mensaje de error, sin el visor vacío.
         error_carga = self.documento.load(str(ruta_pdf))
 
         if error_carga == QPdfDocument.Error.None_ and self.documento.pageCount() > 0:
@@ -106,6 +103,9 @@ class HistorialPedidosDialog(QDialog):
             "Estado",
             "Archivo"
         ])
+
+        # --- NUEVO: Centrar las cabeceras de la tabla ---
+        self.tabla.horizontalHeader().setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self.tabla.setSelectionBehavior(
             QAbstractItemView.SelectionBehavior.SelectRows
@@ -238,45 +238,26 @@ class HistorialPedidosDialog(QDialog):
             fila = self.tabla.rowCount()
             self.tabla.insertRow(fila)
 
-            self.tabla.setItem(
-                fila,
-                0,
-                QTableWidgetItem(
-                    str(order_id)
-                )
-            )
+            # --- NUEVO: Centrar el contenido de cada celda ---
+            item_pedido = QTableWidgetItem(str(order_id))
+            item_pedido.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.tabla.setItem(fila, 0, item_pedido)
 
-            self.tabla.setItem(
-                fila,
-                1,
-                QTableWidgetItem(
-                    str(fecha)
-                )
-            )
+            item_fecha = QTableWidgetItem(str(fecha))
+            item_fecha.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.tabla.setItem(fila, 1, item_fecha)
 
-            self.tabla.setItem(
-                fila,
-                2,
-                QTableWidgetItem(
-                    str(numero_lineas)
-                )
-            )
+            item_lineas = QTableWidgetItem(str(numero_lineas))
+            item_lineas.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.tabla.setItem(fila, 2, item_lineas)
 
-            self.tabla.setItem(
-                fila,
-                3,
-                QTableWidgetItem(
-                    str(estado)
-                )
-            )
+            item_estado = QTableWidgetItem(str(estado))
+            item_estado.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.tabla.setItem(fila, 3, item_estado)
 
-            self.tabla.setItem(
-                fila,
-                4,
-                QTableWidgetItem(
-                    archivo.name
-                )
-            )
+            item_archivo = QTableWidgetItem(archivo.name)
+            item_archivo.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.tabla.setItem(fila, 4, item_archivo)
 
     # ==========================================================
     # ELIMINAR HISTORIAL COMPLETO
