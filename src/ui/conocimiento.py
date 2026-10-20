@@ -8,8 +8,7 @@ La lógica está en modulos/biblioteca.py (sin Qt). Aquí solo hay pantalla.
 import html
 import re
 
-from PySide6.QtCore import Qt, QUrl
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -29,6 +28,7 @@ from PySide6.QtWidgets import (
 )
 
 from modulos.biblioteca import Biblioteca
+from ui.apertura_documentos import abrir_original
 
 FILTROS = [
     ("⭐ Sugeridos (los más importantes)", "sugeridos"),
@@ -389,11 +389,7 @@ class Conocimiento(QWidget):
         doc_id = self._doc_actual_id()
         if doc_id is None:
             return
-        ficha = self.biblioteca.obtener(doc_id)
-        if not QDesktopServices.openUrl(QUrl.fromLocalFile(ficha["ruta_copia"])):
-            QMessageBox.warning(
-                self, "Conocimiento", "No se pudo abrir el archivo original."
-            )
+        abrir_original(self, self.biblioteca, doc_id)
 
     def quitar(self):
         doc_id = self._doc_actual_id()

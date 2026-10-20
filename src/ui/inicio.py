@@ -11,8 +11,6 @@ Si la biblioteca falla o está vacía, Inicio sigue funcionando igual que antes.
 
 import html
 
-from PySide6.QtCore import QUrl
-from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
@@ -23,6 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from modulos.procedimientos import buscar_procedimiento, generar_respuesta
+from ui.apertura_documentos import abrir_original
 
 
 def _con_saltos(texto):
@@ -156,12 +155,10 @@ class Inicio(QWidget):
         enlace = url.toString()
         if not enlace.startswith("abrir:"):
             return
-        biblioteca = self._obtener_biblioteca()
-        if biblioteca is None:
-            return
         try:
-            ficha = biblioteca.obtener(int(enlace.split(":", 1)[1]))
+            doc_id = int(enlace.split(":", 1)[1])
         except ValueError:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "Abrir original", "El enlace del resultado no es válido. Vuelve a buscar.")
             return
-        if ficha:
-            QDesktopServices.openUrl(QUrl.fromLocalFile(ficha["ruta_copia"]))
+        abrir_original(self, self._obtener_biblioteca(), doc_id)
