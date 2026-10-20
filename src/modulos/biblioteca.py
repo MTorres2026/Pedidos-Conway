@@ -858,6 +858,9 @@ class Biblioteca:
         self._con = sqlite3.connect(str(self.carpeta / "biblioteca.db"))
         self._con.row_factory = sqlite3.Row
         self._con.executescript(_ESQUEMA)
+        columnas = {f["name"] for f in self._con.execute("PRAGMA table_info(docs)")}
+        if "ruta_origen" not in columnas:
+            self._con.execute("ALTER TABLE docs ADD COLUMN ruta_origen TEXT NOT NULL DEFAULT ''")
         self._fts = self._crear_fts()
         self._con.commit()
         self._motor_ocr = _MotorOcr()
@@ -1032,6 +1035,9 @@ class Biblioteca:
             "SELECT id FROM docs WHERE clave=?", (clave,)
         ).fetchone()
         if existente:
+            self._con.execute("UPDATE docs SET ruta_origen=? WHERE id=?",
+                              (str(ruta.resolve()), existente["id"]))
+            self._con.commit()
             return ResultadoAlta(
                 True, "Ya estaba en la biblioteca.", nombre,
                 duplicado=True, id=existente["id"],
@@ -1064,6 +1070,8 @@ class Biblioteca:
             ),
         )
         nuevo_id = cur.lastrowid
+        self._con.execute("UPDATE docs SET ruta_origen=? WHERE id=?",
+                          (str(ruta.resolve()), nuevo_id))
 
         if self._fts:
             meta = f"{remitente} {destinatarios} {nombre} {categoria}"
@@ -1262,6 +1270,76 @@ class Biblioteca:
     def obtener(self, doc_id: int) -> Optional[Dict]:
         f = self._con.execute("SELECT * FROM docs WHERE id=?", (doc_id,)).fetchone()
         return dict(f) if f else None
+
+    def resolver_original(self, doc_id: int) -> Path:
+        """Resuelve por rutas reales, nunca por una etiqueta de tipo/extensión.
+
+        Los adjuntos solo existen en el EML salvo que se hayan añadido también
+        por separado. Se identifica esa copia por contenido, no solo por nombre.
+        Si hay varios adjuntos independientes, se conserva la apertura del correo
+        para no elegir arbitrariamente uno de ellos.
+        """
+        ficha = self.obtener(doc_id)
+        if not ficha:
+            raise FileNotFoundError("El resultado ya no está en la biblioteca. Vuelve a buscar.")
+
+        buscadas = []
+
+        def localizar(f):
+            # La biblioteca puede haberse trasladado desde otro equipo.
+            guardada = str(f.get("ruta_copia") or "")
+            nombre_copia = guardada.replace("\\", "/").rsplit("/", 1)[-1]
+            candidatas = [self.originales / nombre_copia] if nombre_copia else []
+            if guardada:
+                candidatas.append(Path(guardada))
+            origen = f.get("ruta_origen")
+            if origen:
+                candidatas.append(Path(origen))
+            original = Path(f.get("archivo") or "")
+            if original.is_absolute():
+                candidatas.append(original)
+            for ruta in candidatas:
+                if ruta not in buscadas:
+                    buscadas.append(ruta)
+                if ruta.is_file():
+                    return ruta.resolve()
+            return None
+
+        ruta = localizar(ficha)
+        # La extensión real permite abrir incluso fichas con tipo mal guardado.
+        if ruta and ruta.suffix.lower() == ".eml":
+            try:
+                with ruta.open("rb") as archivo:
+                    correo = BytesParser(policy=policy.default).parse(archivo)
+                independientes = set()
+                for adjunto in correo.iter_attachments():
+                    if not adjunto.get_filename():
+                        continue
+                    datos = adjunto.get_payload(decode=True)
+                    if datos is None:
+                        continue
+                    base = "file:" + hashlib.sha256(datos).hexdigest()
+                    clave = hashlib.sha256(base.encode("utf-8")).hexdigest()
+                    fila = self._con.execute(
+                        "SELECT * FROM docs WHERE clave=?", (clave,)
+                    ).fetchone()
+                    if fila:
+                        suelta = localizar(dict(fila))
+                        if suelta:
+                            independientes.add(suelta)
+                if len(independientes) == 1:
+                    return independientes.pop()
+            except (OSError, ValueError):
+                # Si no se puede inspeccionar el correo, aún se puede abrir.
+                pass
+        if ruta:
+            return ruta
+        detalle = "\n".join(str(p.absolute()) for p in buscadas)
+        raise FileNotFoundError(
+            f"No se encuentra el archivo «{ficha['archivo']}».\n"
+            f"Se ha buscado en:\n{detalle or '(sin ruta guardada)'}\n"
+            "Vuelve a añadir el archivo a Conocimiento si lo has movido."
+        )
 
     def marcar(self, doc_id: int, estado: str) -> None:
         if estado not in ESTADOS:
