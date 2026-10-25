@@ -5,15 +5,17 @@ ni de librerías externas, para que pueda usarlo también el robot del ERP).
 Cada pedido que sale de FLOW tiene un identificador interno (FLOW-1792...)
 y, con el tiempo, recibe tres números "oficiales":
 
-    ID PEDIDO     6 dígitos. Aparece en pantalla en el ERP cuando una persona
-                  pulsa GUARDAR. Lo lee el robot solo (o se anota a mano).
-    ID SOLICITUD  Llega por correo. Se anota a mano o importando el .eml.
+    ID SOLICITUD  Aparece arriba a la izquierda en el ERP (donde antes ponía
+                  NEXT, p. ej. 0000447789 -> 447789) cuando la persona pulsa
+                  GUARDAR. Lo lee el robot solo (o se anota a mano).
+    ID PEDIDO     Se genera después en PeopleSoft. Se anota a mano o
+                  importando el correo (.eml).
     ID RECEPCION  Se crea en el ERP al recepcionar el pedido en el cine.
                   Se anota a mano, junto con la factura y la fecha/hora.
 
 Todo se guarda en  data/registro_pedidos.db  (SQLite) y, además, los tres
 números se copian dentro del archivo del pedido en data/historial_pedidos/
-(claves idPedidoErp, idSolicitud, idRecepcion dentro de "pedido").
+(claves idSolicitud, idPedidoErp, idRecepcion dentro de "pedido").
 """
 
 from __future__ import annotations
@@ -51,10 +53,10 @@ class IdDuplicado(ErrorRegistro):
 # Constantes
 # ----------------------------------------------------------------------
 
-CAMPOS_ID = ("id_pedido", "id_solicitud", "id_recepcion")
+CAMPOS_ID = ("id_solicitud", "id_pedido", "id_recepcion")
 ETIQUETAS_ID = {
-    "id_pedido": "ID pedido",
     "id_solicitud": "ID solicitud",
+    "id_pedido": "ID pedido",
     "id_recepcion": "ID recepción",
 }
 # Añadimos factura_archivo aquí para que la base de datos sepa que existe
@@ -63,8 +65,8 @@ CAMPOS_FECHA = ("factura_fecha", "recepcion_fecha")
 CAMPOS_HORA = ("recepcion_hora",)
 
 CLAVES_HISTORIAL = {
-    "id_pedido": "idPedidoErp",
     "id_solicitud": "idSolicitud",
+    "id_pedido": "idPedidoErp",
     "id_recepcion": "idRecepcion",
 }
 
@@ -423,21 +425,25 @@ class Registro:
 
     @staticmethod
     def estado_de(rec: Dict) -> str:
-        if not rec.get("id_pedido"):
+        if not rec.get("id_solicitud") and not rec.get("id_pedido"):
             return "Pendiente de guardar en el ERP"
         if not rec.get("id_solicitud"):
-            return "Guardado en ERP · falta ID solicitud"
+            return "Falta ID solicitud"
+        if not rec.get("id_pedido"):
+            return "Guardado en ERP · falta ID pedido"
         if not rec.get("id_recepcion"):
-            return "Solicitud emitida · pendiente de recepción"
+            return "Pedido emitido · pendiente de recepción"
         if not rec.get("factura_numero"):
             return "Recepcionado · falta factura"
         return "Completo"
 
     @staticmethod
     def nombre_visible(rec: Dict) -> str:
-        """El nombre que se enseña al usuario: el ID pedido si ya existe."""
+        """El nombre que se enseña al usuario: ID pedido o ID solicitud si ya existen."""
         if rec.get("id_pedido"):
             return f"Pedido {rec['id_pedido']}"
+        if rec.get("id_solicitud"):
+            return f"Solicitud {rec['id_solicitud']}"
         return rec.get("order_id", "")
 
     # ---------------- sincronizar con el historial ----------------
@@ -448,39 +454,53 @@ class Registro:
         data/historial_pedidos/ y todavía no constan. Devuelve cuántos añadió.
         """
         carpeta = Path(historial_dir) if historial_dir else self.historial_dir
-        if not carpeta.is_dir():
-            return 0
-        with closing(self._abrir()) as con:
-            conocidos = {
-                f["order_id"] for f in con.execute(
-                    "SELECT order_id FROM pedidos WHERE total_lineas > 0")
-            }
         nuevos = 0
-        for archivo in sorted(carpeta.glob("*.json")):
-            m = re.search(r"_pedido_(.+)\.json$", archivo.name)
-            if not m or m.group(1) in conocidos:
-                continue
-            try:
-                datos = json.loads(archivo.read_text(encoding="utf-8"))
-                bloque = datos.get("pedido", datos) if isinstance(datos, dict) else {}
-                order_id = str(bloque.get("orderId") or m.group(1))
-                if order_id in conocidos:
+        if carpeta.is_dir():
+            with closing(self._abrir()) as con:
+                conocidos = {
+                    f["order_id"] for f in con.execute(
+                        "SELECT order_id FROM pedidos WHERE total_lineas > 0")
+                }
+            for archivo in sorted(carpeta.glob("*.json")):
+                m = re.search(r"_pedido_(.+)\.json$", archivo.name)
+                if not m or m.group(1) in conocidos:
                     continue
-                fecha = ""
-                ts = bloque.get("timestamp")
-                if isinstance(ts, (int, float)) and ts > 0:
-                    fecha = datetime.fromtimestamp(ts / 1000).isoformat(timespec="seconds")
-                if not fecha:
-                    fecha = datetime.fromtimestamp(archivo.stat().st_mtime).isoformat(
-                        timespec="seconds")
-                total = bloque.get("totalLineas")
-                if not isinstance(total, int):
-                    total = len(datos.get("lineas", [])) if isinstance(datos, dict) else 0
-                self.asegurar(order_id, fecha, total)
-                conocidos.add(order_id)
-                nuevos += 1
-            except Exception:
-                continue  # archivo raro: se ignora
+                try:
+                    datos = json.loads(archivo.read_text(encoding="utf-8"))
+                    bloque = datos.get("pedido", datos) if isinstance(datos, dict) else {}
+                    order_id = str(bloque.get("orderId") or m.group(1))
+                    if order_id in conocidos:
+                        continue
+                    fecha = ""
+                    ts = bloque.get("timestamp")
+                    if isinstance(ts, (int, float)) and ts > 0:
+                        fecha = datetime.fromtimestamp(ts / 1000).isoformat(timespec="seconds")
+                    if not fecha:
+                        fecha = datetime.fromtimestamp(archivo.stat().st_mtime).isoformat(
+                            timespec="seconds")
+                    total = bloque.get("totalLineas")
+                    if not isinstance(total, int):
+                        total = len(datos.get("lineas", [])) if isinstance(datos, dict) else 0
+                    self.asegurar(order_id, fecha, total)
+                    conocidos.add(order_id)
+                    nuevos += 1
+                except Exception:
+                    continue  # archivo raro: se ignora
+
+        # Recupera también IDs de solicitud que el robot hubiera dejado en espera
+        pendientes_dir = self.ruta_db.parent / "ids_pendientes"
+        if pendientes_dir.is_dir():
+            for pend in sorted(pendientes_dir.glob("*.json")):
+                try:
+                    info = json.loads(pend.read_text(encoding="utf-8"))
+                    oid = str(info.get("order_id") or pend.stem).strip()
+                    id_sol = str(info.get("id_solicitud") or "").strip()
+                    if oid and id_sol:
+                        self.asegurar(oid)
+                        self.fijar(oid, origen="robot", id_solicitud=id_sol)
+                        pend.unlink(missing_ok=True)
+                except Exception:
+                    continue
         return nuevos
 
     def volcar_en_historial(self, order_id) -> int:
@@ -559,8 +579,8 @@ class Registro:
 
     def analizar_correo(self, ruta) -> CorreoAnalizado:
         """
-        Lee un .eml y propone qué números parecen ser el ID de solicitud, y a
-        qué pedido corresponde. Siempre lo confirma la persona.
+        Lee un .eml y propone qué números parecen ser el ID de pedido, y a
+        qué solicitud/pedido corresponde. Siempre lo confirma la persona.
         """
         ruta = Path(ruta)
         asunto, fecha, texto = self._texto_de_correo(ruta)
@@ -586,30 +606,30 @@ class Registro:
             asunto=asunto, fecha=fecha, candidatos=list(vistos.items())
         )
 
-        # ¿Algún número del correo es el ID pedido de un pedido conocido?
+        # ¿Algún número del correo es el ID solicitud de un pedido conocido?
         pedidos = self.listar(1000)
-        por_id_pedido = {p["id_pedido"]: p for p in pedidos if p["id_pedido"]}
+        por_id_solicitud = {p["id_solicitud"]: p for p in pedidos if p["id_solicitud"]}
         numeros = {normalizar_id(n) for n in re.findall(r"\d{5,10}", t)}
         for numero in numeros:
-            if numero in por_id_pedido:
-                analizado.pedido_sugerido = por_id_pedido[numero]["order_id"]
+            if numero in por_id_solicitud:
+                analizado.pedido_sugerido = por_id_solicitud[numero]["order_id"]
                 analizado.motivo_sugerencia = (
-                    f"el correo menciona el ID pedido {numero}"
+                    f"el correo menciona el ID solicitud {numero}"
                 )
-                # ese número no puede ser, a la vez, el ID de solicitud
+                # ese número es el ID solicitud, no puede ser a la vez el ID pedido
                 analizado.candidatos = [
                     (i, m) for i, m in analizado.candidatos if i != numero
                 ]
                 break
         if analizado.pedido_sugerido is None:
             pendientes = [
-                p for p in pedidos if p["id_pedido"] and not p["id_solicitud"]
+                p for p in pedidos if p["id_solicitud"] and not p["id_pedido"]
             ]
             if pendientes:
-                # el que se guardó en el ERP más recientemente
-                pendientes.sort(key=lambda p: p["id_pedido_fecha"], reverse=True)
+                # la solicitud que se guardó en el ERP más recientemente
+                pendientes.sort(key=lambda p: p["id_solicitud_fecha"], reverse=True)
                 analizado.pedido_sugerido = pendientes[0]["order_id"]
                 analizado.motivo_sugerencia = (
-                    "es el último pedido guardado en el ERP que aún no tiene ID solicitud"
+                    "es la última solicitud guardada en el ERP que aún no tiene ID pedido"
                 )
         return analizado
