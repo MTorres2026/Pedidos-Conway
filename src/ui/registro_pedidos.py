@@ -9,7 +9,12 @@ Para cada pedido enviado desde FLOW muestra y permite anotar:
 La lógica está en modulos/registro_pedidos.py (sin Qt).
 """
 
+import json
+import os
 import re
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
@@ -292,6 +297,13 @@ class RegistroPedidosDialog(QDialog):
         layout.addWidget(self.tabla, 1)
 
         fila_botones = QHBoxLayout()
+        self.boton_enviar_erp = QPushButton("📤 Enviar a ERP")
+        self.boton_enviar_erp.setStyleSheet(
+            "QPushButton { background-color: #1976d2; color: white; font-weight: bold; "
+            "padding: 6px 14px; border-radius: 5px; }"
+            "QPushButton:hover { background-color: #1565c0; }"
+            "QPushButton:disabled { background-color: #cfd8dc; color: #78909c; }"
+        )
         self.boton_editar = QPushButton("✏️ Anotar / editar datos…")
         self.boton_correo = QPushButton("📧 Importar correo de pedido (.eml)…")
         self.boton_cambios = QPushButton("📜 Ver cambios")
@@ -303,7 +315,13 @@ class RegistroPedidosDialog(QDialog):
 
         boton_cerrar = QPushButton("CERRAR")
         
-        for b in (self.boton_editar, self.boton_correo, self.boton_cambios, self.boton_eliminar):
+        for b in (
+            self.boton_enviar_erp,
+            self.boton_editar,
+            self.boton_correo,
+            self.boton_cambios,
+            self.boton_eliminar,
+        ):
             fila_botones.addWidget(b)
             
         fila_botones.addStretch()
@@ -315,6 +333,7 @@ class RegistroPedidosDialog(QDialog):
 
         boton_buscar.clicked.connect(self.recargar)
         self.caja_busqueda.returnPressed.connect(self.recargar)
+        self.boton_enviar_erp.clicked.connect(self.enviar_a_erp)
         self.boton_editar.clicked.connect(self.editar)
         self.boton_correo.clicked.connect(self.importar_correo)
         self.boton_cambios.clicked.connect(self.ver_cambios)
@@ -325,6 +344,7 @@ class RegistroPedidosDialog(QDialog):
         
         boton_cerrar.clicked.connect(self.accept)
         self.tabla.cellDoubleClicked.connect(lambda *_: self.editar())
+        self.tabla.itemSelectionChanged.connect(self._actualizar_boton_erp)
 
         # Trae a la lista los pedidos que ya están en el historial.
         try:
@@ -393,10 +413,243 @@ class RegistroPedidosDialog(QDialog):
         if fila_a_elegir >= 0:
             self.tabla.selectRow(fila_a_elegir)
 
+        self._actualizar_boton_erp()
         completos = sum(1 for f in filas if self.registro.estado_de(f) == "Completo")
         self.estado.setText(f"{len(filas)} pedidos · {completos} completos")
 
     # ------------------------------------------------------------------
+    def _base_dir(self) -> Path:
+        if getattr(sys, "frozen", False):
+            return Path(sys.executable).resolve().parents[2]
+        return Path(__file__).resolve().parents[2]
+
+    def _ruta_robot(self) -> Path:
+        return self._base_dir() / "src" / "robot_erp.py"
+
+    def _python_para_robot(self):
+        ruta_env = os.environ.get("ROBOT_PYTHON")
+        if ruta_env and Path(ruta_env).exists():
+            return ruta_env
+        if not getattr(sys, "frozen", False):
+            return sys.executable
+        return shutil.which("python") or shutil.which("py")
+
+    def _actualizar_boton_erp(self):
+        rec = self._seleccionado()
+        if rec is not None and rec.get("id_solicitud"):
+            self.boton_enviar_erp.setEnabled(False)
+            self.boton_enviar_erp.setToolTip(
+                f"Este pedido ya está guardado en el ERP (ID solicitud {rec['id_solicitud']})."
+            )
+        else:
+            self.boton_enviar_erp.setEnabled(True)
+            self.boton_enviar_erp.setToolTip(
+                "Lanzar el robot de Chrome para cargar este pedido en PeopleSoft."
+            )
+
+    def _buscar_datos_pedido(self, order_id: str):
+        """
+        Busca el JSON con las líneas del pedido en data/ (priorizando la versión
+        más reciente o corregida en Pedidos, y luego el historial).
+        """
+        order_str = str(order_id).strip()
+        data_dir = self.registro.ruta_db.parent
+        historial_dir = self.registro.historial_dir
+
+        def _leer_si_coincide(ruta: Path, exigir_id: bool = False):
+            if not ruta.is_file():
+                return None
+            try:
+                datos = json.loads(ruta.read_text(encoding="utf-8"))
+            except Exception:
+                return None
+            if not isinstance(datos, dict):
+                return None
+            bloque = datos.get("pedido", datos)
+            oid_arch = bloque.get("orderId") if isinstance(bloque, dict) else None
+            if exigir_id and str(oid_arch or "") != order_str:
+                return None
+            lineas = datos.get("lineas") or (
+                bloque.get("lineas") if isinstance(bloque, dict) else None
+            )
+            if not lineas:
+                return None
+            return datos
+
+        # 1) Si es el pedido_actual (puede tener correcciones hechas en Pedidos)
+        datos = _leer_si_coincide(data_dir / "pedido_actual.json", exigir_id=True)
+        if datos is not None:
+            return datos
+
+        # 2) Si ya se preparó antes para el robot (conserva correcciones previas)
+        datos = _leer_si_coincide(
+            data_dir / "pedidos_para_procesar" / f"pedido_{order_str}.json"
+        )
+        if datos is not None:
+            return datos
+
+        # 3) En historial_pedidos (punto de guardado de todos los pedidos recibidos)
+        if historial_dir.is_dir():
+            exactos = sorted(
+                (
+                    p for p in historial_dir.glob("*.json")
+                    if p.name.endswith(f"_pedido_{order_str}.json")
+                ),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            )
+            for arch in exactos:
+                datos = _leer_si_coincide(arch)
+                if datos is not None:
+                    return datos
+            for arch in sorted(
+                historial_dir.glob("*.json"),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            ):
+                datos = _leer_si_coincide(arch, exigir_id=True)
+                if datos is not None:
+                    return datos
+
+        # 4) Copia original de recepción
+        return _leer_si_coincide(
+            data_dir / "pedidos_recibidos" / f"pedido_{order_str}_original.json"
+        )
+
+    def enviar_a_erp(self):
+        rec = self._seleccionado()
+        if rec is None:
+            QMessageBox.information(
+                self, "Enviar a ERP", "Elige primero un pedido pendiente de la lista."
+            )
+            return
+
+        if rec.get("id_solicitud"):
+            QMessageBox.information(
+                self,
+                "Ya guardado en el ERP",
+                f"Este pedido ya tiene ID de solicitud en el ERP ({rec['id_solicitud']}).",
+            )
+            return
+
+        order_id = str(rec["order_id"]).strip()
+        datos_origen = self._buscar_datos_pedido(order_id)
+        if datos_origen is None:
+            QMessageBox.warning(
+                self,
+                "Archivo del pedido no encontrado",
+                f"No se encontró el archivo con las líneas del pedido «{order_id}» "
+                "en data/historial_pedidos/.\n\n"
+                "Es posible que se borraran los archivos del historial.",
+            )
+            return
+
+        bloque_orig = datos_origen.get("pedido", {})
+        lineas = datos_origen.get("lineas") or (
+            bloque_orig.get("lineas") if isinstance(bloque_orig, dict) else []
+        )
+
+        respuesta = QMessageBox.question(
+            self,
+            "Enviar a ERP",
+            f"¿Quieres enviar el pedido «{self.registro.nombre_visible(rec)}» "
+            f"({len(lineas)} líneas) al robot de carga en el ERP?\n\n"
+            "Se abrirá Chrome e irá rellenando las líneas automáticamente.\n"
+            "El robot NO pulsa Guardar: revisa el pedido y pulsa Guardar en el ERP "
+            "(el ID de solicitud se anotará aquí solo).",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if respuesta != QMessageBox.StandardButton.Yes:
+            return
+
+        data_dir = self.registro.ruta_db.parent
+        proc_dir = data_dir / "pedidos_para_procesar"
+        proc_dir.mkdir(parents=True, exist_ok=True)
+        archivo_procesar = proc_dir / f"pedido_{order_id}.json"
+
+        datos_procesar = dict(datos_origen)
+        if isinstance(datos_procesar.get("pedido"), dict):
+            datos_procesar["pedido"] = dict(datos_procesar["pedido"])
+        else:
+            datos_procesar["pedido"] = {}
+        datos_procesar["pedido"]["orderId"] = order_id
+        datos_procesar["pedido"]["estado"] = "ENVIADO A ERP"
+
+        try:
+            archivo_procesar.write_text(
+                json.dumps(datos_procesar, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Error",
+                f"No se pudo preparar el archivo del pedido para el robot:\n{e}",
+            )
+            return
+
+        # Si coincide con el pedido activo de la pestaña Pedidos, sincroniza su estado
+        try:
+            estado_path = data_dir / "estado_pedido.json"
+            actual_path = data_dir / "pedido_actual.json"
+            mismo_activo = False
+            if estado_path.is_file():
+                est = json.loads(estado_path.read_text(encoding="utf-8"))
+                mismo_activo = str(est.get("orderId") or "") == order_id
+            elif actual_path.is_file():
+                act = json.loads(actual_path.read_text(encoding="utf-8"))
+                mismo_activo = str(act.get("pedido", act).get("orderId") or "") == order_id
+            if mismo_activo:
+                estado_path.write_text(
+                    json.dumps({"orderId": order_id, "estado": "ENVIADO A ERP"},
+                               ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+        except Exception:
+            pass
+
+        robot_python = self._python_para_robot()
+        ruta_robot = self._ruta_robot()
+
+        if not robot_python or not ruta_robot.exists():
+            QMessageBox.critical(
+                self,
+                "Robot no disponible",
+                "No se encontró cómo lanzar el robot de carga en el ERP.\n\n"
+                f"Script esperado en: {ruta_robot}\n"
+                f"Python para el robot: {robot_python or 'no encontrado'}\n\n"
+                "El pedido ha quedado listo en pedidos_para_procesar/ y puedes "
+                f'ejecutarlo a mano:\n\npython "{ruta_robot}" "{archivo_procesar}"',
+            )
+            return
+
+        try:
+            subprocess.Popen(
+                [
+                    robot_python,
+                    str(ruta_robot),
+                    str(archivo_procesar),
+                    "--auto",
+                ],
+                cwd=str(ruta_robot.parent),
+            )
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Error",
+                f"No se pudo lanzar el robot:\n{e}",
+            )
+            return
+
+        QMessageBox.information(
+            self,
+            "Robot en marcha",
+            f"Se ha lanzado el robot para «{self.registro.nombre_visible(rec)}».\n\n"
+            "Se abrirá Chrome e irá rellenando las líneas.\n"
+            "Cuando termine, revisa el pedido y pulsa Guardar en el ERP: "
+            "el ID de solicitud aparecerá anotado aquí automáticamente.",
+        )
     def editar(self):
         rec = self._seleccionado()
         if rec is None:
