@@ -11,6 +11,7 @@ import json
 import os
 import re
 import sys
+import threading
 import time
 import getpass
 import unicodedata
@@ -658,15 +659,21 @@ def verificar_pantalla_activa(driver, elem_id="REQ_LINE_WRK_INV_ITEM_ID$0", time
         return False
 
 
-def mostrar_ventana(titulo, texto, error=True):
+def mostrar_ventana(titulo, texto, error=True, estado_vigilante=None):
     try:
         import tkinter as tk
         root = tk.Tk()
         root.title(titulo)
         root.attributes("-topmost", True)
-        tk.Label(root, text=("ATENCIÓN: hay líneas que revisar" if error else "Carga finalizada"),
-                 font=("Segoe UI", 14, "bold"), fg="white",
-                 bg=("#b00020" if error else "#1b6e2f"), pady=8).pack(fill="x")
+        cabecera = tk.Label(
+            root,
+            text=("ATENCIÓN: hay líneas que revisar" if error else "Carga finalizada"),
+            font=("Segoe UI", 14, "bold"),
+            fg="white",
+            bg=("#b00020" if error else "#1b6e2f"),
+            pady=8,
+        )
+        cabecera.pack(fill="x")
         marco = tk.Frame(root)
         marco.pack(fill="both", expand=True, padx=8, pady=8)
         sb = tk.Scrollbar(marco)
@@ -679,13 +686,50 @@ def mostrar_ventana(titulo, texto, error=True):
         txt.config(state="disabled")
 
         def copiar():
+            contenido = txt.get("1.0", "end-1c")
             root.clipboard_clear()
-            root.clipboard_append(texto)
+            root.clipboard_append(contenido)
             root.update()
         barra = tk.Frame(root)
         barra.pack(pady=(0, 8))
         tk.Button(barra, text="Copiar", command=copiar, width=14).pack(side="left", padx=6)
         tk.Button(barra, text="Cerrar", command=root.destroy, width=14).pack(side="left", padx=6)
+
+        if isinstance(estado_vigilante, dict):
+            notificado = [False]
+
+            def _revisar_vigilante():
+                try:
+                    id_sol = estado_vigilante.get("id_solicitud")
+                    if id_sol and not notificado[0]:
+                        notificado[0] = True
+                        cabecera.config(
+                            text=f"✅ ID de Solicitud {id_sol} guardado en CineStock",
+                            bg="#1b6e2f",
+                        )
+                        txt.config(state="normal")
+                        txt.insert(
+                            "1.0",
+                            f"✅ ID de Solicitud detectado y anotado automáticamente en CineStock: {id_sol}\n"
+                            "Ya puedes cerrar esta ventana.\n"
+                            + ("-" * 75) + "\n\n",
+                        )
+                        txt.see("1.0")
+                        txt.config(state="disabled")
+                        root.lift()
+                        if not error:
+                            root.after(4000, root.destroy)
+                        return
+                    if estado_vigilante.get("fin"):
+                        if not error:
+                            root.after(1500, root.destroy)
+                        return
+                    root.after(400, _revisar_vigilante)
+                except Exception:
+                    pass
+
+            root.after(400, _revisar_vigilante)
+
         root.update_idletasks()
         root.lift()
         root.focus_force()
@@ -1806,33 +1850,71 @@ def main():
         inf.fatal = f"Error inesperado: {resumen_error(e)}"
         print(f"\n¡{inf.fatal}")
         
+    vigilar_activo = (driver is not None and not inf.fatal)
+    estado_vigilante = {"id_solicitud": None, "fin": False} if vigilar_activo else None
+    hilo_ventana = None
+
     if inf.hay_errores:
         guardar_informe(inf, driver)
         print("\n" + inf.texto())
-        
-        txt_error = (f"Se han cargado {len(datos) - len(inf.lineas)} líneas. Hay {len(inf.lineas)} incidencias.\n\n"
-                     "👉 IMPORTANTE: Ve a Chrome, revisa las líneas marcadas en el informe, corrígelas a mano y pulsa GUARDAR en el ERP.\n\n"
-                     "NO CIERRES ESTA VENTANA NI LA CONSOLA NEGRA. El robot se quedará esperando en segundo plano para leer el ID de Solicitud automáticamente en cuanto pulses Guardar.")
-        mostrar_ventana("Pedido ERP - Revisión necesaria", txt_error, error=True)
+
+        if vigilar_activo:
+            txt_error = (
+                f"Se han cargado {len(datos) - len(inf.lineas)} líneas. Hay {len(inf.lineas)} incidencias.\n\n"
+                "👉 IMPORTANTE: Ve a Chrome, revisa las líneas indicadas abajo, corrígelas a mano y pulsa GUARDAR en el ERP.\n"
+                "NO cierres la consola negra: el robot ya está vigilando en segundo plano y anotará el ID de Solicitud "
+                "automáticamente en CineStock en cuanto pulses Guardar.\n\n"
+                + ("-" * 75) + "\n" + inf.texto()
+            )
+            hilo_ventana = threading.Thread(
+                target=mostrar_ventana,
+                args=("Pedido ERP - Revisión necesaria", txt_error, True, estado_vigilante),
+                daemon=True,
+            )
+            hilo_ventana.start()
+        else:
+            mostrar_ventana("Pedido ERP - Error", inf.texto(), error=True)
     else:
-        txt_ok = (f"¡Las {len(datos)} líneas se han cargado correctamente!\n\n"
-                  "👉 PULSA 'GUARDAR' EN EL ERP AHORA.\n\n"
-                  "NO CIERRES ESTA VENTANA NI LA CONSOLA NEGRA. El robot se quedará esperando en segundo plano para leer el ID de Solicitud automáticamente en cuanto pulses Guardar, y lo anotará en tu Registro de Pedidos.")
+        txt_ok = (
+            f"¡Las {len(datos)} líneas se han cargado correctamente!\n\n"
+            "👉 PULSA 'GUARDAR' EN EL ERP AHORA.\n\n"
+            "NO cierres la consola negra: el robot ya está vigilando en segundo plano para leer el "
+            "ID de Solicitud automáticamente en cuanto pulses Guardar, y lo anotará en CineStock."
+        )
         print("\n" + txt_ok)
-        mostrar_ventana("Pedido ERP - Carga finalizada", txt_ok, error=False)
-        
-    # --- VIGILANTE EN SU SITIO CORRECTO ---
-    if args.auto and driver is not None and not inf.fatal:
+        if vigilar_activo:
+            hilo_ventana = threading.Thread(
+                target=mostrar_ventana,
+                args=("Pedido ERP - Carga finalizada", txt_ok, False, estado_vigilante),
+                daemon=True,
+            )
+            hilo_ventana.start()
+        else:
+            mostrar_ventana("Pedido ERP - Carga finalizada", txt_ok, error=False)
+
+    # --- VIGILANTE DEL ID DE SOLICITUD (ARRANCA AL INSTANTE SIN BLOQUEARSE) ---
+    if vigilar_activo:
         try:
-            from robot_id_pedido import vigilar_id_pedido
-            print("\n" + "="*60)
+            from robot_id_pedido import vigilar_id_solicitud
+            print("\n" + "=" * 60)
             print(" 🕵️‍♂️ ESPERANDO A QUE PULSES GUARDAR EN EL ERP...")
-            print(" (Deja esta ventana abierta. El robot leerá el ID solo)")
-            print("="*60 + "\n")
-            # 'ruta' aquí SÍ existe (la del cargar_datos)
-            vigilar_id_pedido(driver, ruta)
+            print(" (Deja esta consola abierta. El robot leerá el ID Solicitud solo)")
+            print("=" * 60 + "\n")
+
+            def _al_detectar(id_sol):
+                if estado_vigilante is not None:
+                    estado_vigilante["id_solicitud"] = id_sol
+
+            vigilar_id_solicitud(driver, ruta, al_detectar=_al_detectar)
         except Exception as e:
-            print(f"[aviso] No se pudo vigilar el ID de pedido: {e}")
+            print(f"[aviso] No se pudo vigilar el ID de solicitud: {e}")
+        finally:
+            if estado_vigilante is not None:
+                estado_vigilante["fin"] = True
+            if hilo_ventana is not None and hilo_ventana.is_alive():
+                # Si no hubo incidencias se cierra sola a los ~4s; si hubo incidencias
+                # damos margen o esperamos a que el usuario cierre el informe.
+                hilo_ventana.join(timeout=6.0 if not inf.hay_errores else None)
     # ---------------------------------------------------
 
     # CORREGIDO: antes se hacía driver.quit() aquí, cerrando Chrome y perdiendo el pedido sin guardar.
