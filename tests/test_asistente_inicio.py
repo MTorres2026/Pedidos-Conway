@@ -886,6 +886,39 @@ class ResilienciaManualVisualTests(unittest.TestCase):
         self.assertNotIn("Buen día", unido)
         self.assertIn("PeopleSoft", unido)
 
+    def test_hoja_garantizada_aunque_las_diapositivas_solo_tengan_rotulos(self):
+        from modulos.asistente_inicio import PasajeManual
+
+        resp = RespuestaAsistente(
+            pregunta="¿Cómo se hace la conciliación de inventario?",
+            pasajes=[
+                PasajeManual(
+                    doc_id=7, titulo_documento="Mail tipo día antes de la toma de inventarios",
+                    tipo_documento="correo", fecha="", categoria="", remitente="",
+                    estado="NORMAL", titulo_seccion="",
+                    texto_seccion=(
+                        "Stock Location Status\nCarga de salida\n"
+                        "Informe de Conciliación\nHora de finalización, antes 1:00pm"
+                    ),
+                    puntuacion=80.0,
+                ),
+                PasajeManual(
+                    doc_id=7, titulo_documento="Mail tipo día antes de la toma de inventarios",
+                    tipo_documento="correo", fecha="", categoria="", remitente="",
+                    estado="NORMAL", titulo_seccion="Diapositiva 1",
+                    texto_seccion="Conciliación de inventarios",
+                    puntuacion=80.0,
+                ),
+            ],
+        )
+        manual = construir_manual_desde_respuesta(resp)
+        self.assertTrue(any(f.pasos for f in manual.fases))
+        html_out = renderizar_respuesta_asistente_html(resp, turno_id=9)
+        self.assertIn("HOJA DE MANUAL OPERATIVO", html_out)
+        self.assertIn("HOJA DE MANUAL V4", html_out)
+        self.assertIn("Stock Location Status", html_out)
+        self.assertNotIn("GUÍA EXTRAÍDA", html_out)
+
 
 class InicioInterfazChatTests(unittest.TestCase):
     def _cargar_modulo_inicio(self):

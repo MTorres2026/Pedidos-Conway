@@ -3136,6 +3136,54 @@ def construir_manual_desde_respuesta(respuesta: RespuestaAsistente) -> ManualEst
         if fase.pasos:
             manual.fases.append(fase)
 
+    # GARANTÍA DE HOJA: si el manual es muy visual (diapositivas con rótulos
+    # y campos, sin frases completas) y no se ha podido formar ningún paso,
+    # la hoja se construye igualmente con el contenido literal del documento
+    # ganador. Nunca más el documento «en crudo» como respuesta.
+    if not any(f.pasos for f in manual.fases) and pasajes_fuente:
+        pasos_respaldo: List[PasoHojaManual] = []
+        vistos_respaldo: Set[str] = set()
+        pregunta_norm = normalizar(respuesta.pregunta or "")
+        for pasaje in pasajes_fuente[:14]:
+            if pasaje.sin_texto_ocr:
+                continue
+            for cruda in (pasaje.texto_seccion or "").splitlines():
+                s = _limpiar_marcas_texto_plano(cruda)
+                s = re.sub(r"^[▪▸◆●◦]\s*", "", s).strip()
+                if not s or s.startswith("---") or _es_linea_saludo_o_cortesia(s):
+                    continue
+                s = re.sub(r"^(\d{1,3})[.)\-]\s+", "", s)
+                s = re.sub(r"^[-•*]\s+", "", s).strip()
+                clave = normalizar(s)
+                if not clave or clave in vistos_respaldo or clave == pregunta_norm:
+                    continue
+                if len(s) > 240:
+                    frases = [
+                        f.strip() for f in re.split(r"(?<=[.!?])\s+", s) if f.strip()
+                    ]
+                    candidatas = [f for f in frases if _es_unidad_accionable(f) or len(f) <= 90]
+                    if not candidatas:
+                        continue
+                    s = candidatas[0]
+                    clave = normalizar(s)
+                    if clave in vistos_respaldo:
+                        continue
+                vistos_respaldo.add(clave)
+                pasos_respaldo.append(PasoHojaManual(
+                    numero=len(pasos_respaldo) + 1,
+                    pantalla=(pasaje.titulo_seccion or "En pantalla").strip(),
+                    accion=s,
+                ))
+                if len(pasos_respaldo) >= 30:
+                    break
+            if len(pasos_respaldo) >= 30:
+                break
+        if pasos_respaldo:
+            manual.fases.append(FaseHojaManual(
+                titulo="Procedimiento paso a paso (extraído del documento)",
+                pasos=pasos_respaldo,
+            ))
+
     # Renumeración global continua (PASO 1, 2, 3… aunque haya varias fases)
     contador = 0
     for fase in manual.fases:
@@ -4547,7 +4595,7 @@ def renderizar_respuesta_asistente_html(
             bloques.append(formatear_markdown_ia_html(
                 _texto_estructurado_desde_manual(manual_local),
                 titulo_respaldo=f"Manual paso a paso: {respuesta.pregunta.strip()}",
-                proveedor_ia="CineStock · Hoja de Manual",
+                proveedor_ia="CineStock · Hoja de Manual v4",
                 turno_id=turno_id,
             ))
             if respuesta.pasajes:
