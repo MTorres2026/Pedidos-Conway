@@ -177,6 +177,49 @@ generar el reporte “Estado de Inventario” y validar que se haya finalizado.
         for p in resp.pasajes:
             self.assertNotIn("FAMILIAR", p.texto_seccion)
 
+    def test_encuentra_manual_con_guiones_bajos_prosa_y_plural_inventarios(self):
+        bib_dedicada = Biblioteca(self.raiz / "bib_dedicada")
+        self.addCleanup(bib_dedicada.cerrar)
+        with patch.object(bib_dedicada, "_ocr_callable", return_value=None):
+            # Manual con '_' en el nombre, viñetas PDF '' y subapartados que no repiten el título
+            manual_pdf_prosa = self.raiz / "20260918_Manual_Conciliacion_de_Inventarios.txt"
+            manual_pdf_prosa.write_text(
+                "1. Acceso al módulo\n"
+                " Ingresar en Cinema Manager con credenciales de gerencia y abrir la pestaña principal.\n"
+                "2. Revisión de variaciones\n"
+                " Seleccionar la fecha del conteo semanal en el desplegable y pulsar Calcular.\n"
+                " Verificar en pantalla los artículos con diferencias antes de pulsar Finalizar.",
+                encoding="utf-8",
+            )
+            alta = bib_dedicada.agregar_archivo(manual_pdf_prosa)
+
+        for consulta in (
+            "conciliacion de inventarios",
+            "¿Cómo se hace la conciliación de inventario?",
+        ):
+            with self.subTest(consulta=consulta):
+                resp = consultar_base_local(consulta, bib_dedicada)
+                self.assertTrue(resp.tiene_contenido)
+                self.assertEqual(resp.pasajes[0].doc_id, alta.id)
+                unido = "\n".join(p.texto_seccion for p in resp.pasajes)
+                self.assertIn("Cinema Manager", unido)
+                self.assertIn("Finalizar", unido)
+
+    def test_detecta_pdf_escaneado_sin_texto_por_su_titulo_y_ofrece_abrirlo(self):
+        bib_scan = Biblioteca(self.raiz / "bib_scan")
+        self.addCleanup(bib_scan.cerrar)
+        with patch.object(bib_scan, "_ocr_callable", return_value=None):
+            f_vacio = self.raiz / "2026_Conciliacion_Inventarios_Guia.txt"
+            f_vacio.write_text("", encoding="utf-8")
+            alta = bib_scan.agregar_archivo(f_vacio)
+
+        resp = consultar_base_local("conciliación de inventarios", bib_scan)
+        self.assertTrue(resp.tiene_contenido)
+        self.assertTrue(resp.solo_documento_sin_ocr)
+        html_out = renderizar_respuesta_asistente_html(resp)
+        self.assertIn("Manual localizado", html_out)
+        self.assertIn(f'href="abrir:{alta.id}"', html_out)
+
     def test_divide_diapositivas_y_encuentra_albaran_exacto(self):
         secciones = dividir_documento_en_secciones(PRESENTACION_PPTX_SIMULADA)
         self.assertEqual(len(secciones), 2)

@@ -420,6 +420,7 @@ class Inicio(QWidget):
             self.check_ia.isChecked()
             and detectar_proveedor_ia() is not None
             and respuesta.tiene_contenido
+            and not respuesta.solo_documento_sin_ocr
         )
 
         # Historial breve para dar contexto a preguntas de continuación con IA
