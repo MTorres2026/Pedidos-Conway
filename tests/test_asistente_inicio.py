@@ -374,6 +374,35 @@ class InicioInterfazChatTests(unittest.TestCase):
                 widget.limpiar_chat()
                 self.assertIn("Hola", widget.respuesta.ultimo_html)
 
+    def test_inicio_arranca_sin_modulo_apertura_documentos(self):
+        """Garantiza compatibilidad con instalaciones previas sin ui/apertura_documentos.py."""
+        import importlib
+        import sys
+
+        mod_base = self._cargar_modulo_inicio()
+        self.assertIsNotNone(mod_base)
+
+        # Forzar ausencia de ui.apertura_documentos como en versiones anteriores del portátil
+        qt_core = MagicMock()
+        qt_core.Signal = lambda *a, **kw: MagicMock()
+        qt_gui = MagicMock()
+        qt_widgets = MagicMock()
+        qt_widgets.QWidget = type("_W", (), {"__init__": lambda s, *a, **k: None})
+
+        with patch.dict(
+            sys.modules,
+            {
+                "PySide6": MagicMock(QtCore=qt_core, QtGui=qt_gui, QtWidgets=qt_widgets),
+                "PySide6.QtCore": qt_core,
+                "PySide6.QtGui": qt_gui,
+                "PySide6.QtWidgets": qt_widgets,
+                "ui.apertura_documentos": None,
+            },
+        ):
+            sys.modules.pop("ui.inicio", None)
+            mod_sin_apertura = importlib.import_module("ui.inicio")
+            self.assertTrue(callable(mod_sin_apertura.abrir_original))
+
 
 if __name__ == "__main__":
     unittest.main()

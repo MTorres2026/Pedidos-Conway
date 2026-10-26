@@ -17,8 +17,10 @@ import html
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
-from PySide6.QtCore import Qt, QThread, Signal
-from PySide6.QtGui import QTextCursor
+from pathlib import Path
+
+from PySide6.QtCore import Qt, QThread, QUrl, Signal
+from PySide6.QtGui import QDesktopServices, QTextCursor
 from PySide6.QtWidgets import (
     QCheckBox,
     QHBoxLayout,
@@ -39,7 +41,48 @@ from modulos.asistente_inicio import (
     renderizar_respuesta_asistente_html,
     sintetizar_con_ia,
 )
-from ui.apertura_documentos import abrir_original
+
+try:
+    from ui.apertura_documentos import abrir_original
+except ImportError:
+    def abrir_original(parent, biblioteca, doc_id):
+        """Respaldo autónomo para instalaciones que no tengan ui/apertura_documentos.py."""
+        ruta = None
+        try:
+            if biblioteca is None:
+                raise RuntimeError("La biblioteca de Conocimiento no está disponible.")
+            if hasattr(biblioteca, "resolver_original"):
+                ruta = biblioteca.resolver_original(doc_id)
+            else:
+                ficha = biblioteca.obtener(doc_id) if hasattr(biblioteca, "obtener") else None
+                if not ficha:
+                    raise FileNotFoundError("El documento ya no está en la biblioteca.")
+                candidatas = []
+                guardada = str(ficha.get("ruta_copia") or "")
+                if guardada and hasattr(biblioteca, "originales"):
+                    nombre = guardada.replace("\\", "/").rsplit("/", 1)[-1]
+                    if nombre:
+                        candidatas.append(Path(biblioteca.originales) / nombre)
+                if guardada:
+                    candidatas.append(Path(guardada))
+                if ficha.get("archivo"):
+                    candidatas.append(Path(ficha["archivo"]))
+                for c in candidatas:
+                    if c.is_file():
+                        ruta = c.resolve()
+                        break
+                if ruta is None:
+                    raise FileNotFoundError(
+                        f"No se encuentra el archivo original ({ficha.get('archivo', '')})."
+                    )
+            if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(ruta))):
+                raise RuntimeError(
+                    "El sistema no ha podido abrir el archivo. Comprueba que hay "
+                    "un programa asociado a esta extensión."
+                )
+        except Exception as error:
+            detalle = f"\n\nArchivo: {ruta}" if ruta else ""
+            QMessageBox.warning(parent, "Abrir original", f"{error}{detalle}")
 
 
 # ======================================================================
