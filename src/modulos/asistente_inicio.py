@@ -971,6 +971,17 @@ def buscar_pasajes_biblioteca(
                         s for s in secciones_puntuadas if s[1] >= adjunto_exacto_idx
                     ]
 
+            # Correo que reenvía una presentación: quédate SOLO con las
+            # diapositivas del manual. El cuerpo del correo (saludo, criterios
+            # del día antes, firma) no forma parte del procedimiento.
+            if tipo_doc == "correo" and adjunto_exacto_idx is None:
+                solo_manual_visual = [
+                    s for s in secciones_puntuadas
+                    if s[2].lower().startswith(("diapositiva", "adjunto:", "archivo:"))
+                ]
+                if solo_manual_visual:
+                    secciones_puntuadas = solo_manual_visual
+
             con_chicha = [s for s in secciones_puntuadas if s[0] >= 55.0] or secciones_puntuadas
             sin_sobres = [
                 s for s in con_chicha
@@ -1164,7 +1175,7 @@ def buscar_pasajes_biblioteca(
 MAX_BYTES_PDF_DIRECTO = 20 * 1024 * 1024  # 20 MB para PDF directo
 MAX_PAGINAS_PDF_ADJUNTO = 40
 MAX_DIAPOSITIVAS_VISUALES = 46
-VERSION_CACHE_IA = "v3_hoja_manual_erp_detallado"
+VERSION_CACHE_IA = "v4_hoja_manual_solo_manual_real"
 
 _MIMES_IMAGEN = {
     ".png": "image/png",
@@ -2711,16 +2722,15 @@ def sintetizar_con_ia(
 
             for mod_actual in modelos_candidatos:
                 modelo_usado = mod_actual
-                det_img = (
-                    "low"
-                    if (mod_actual == "gpt-4o-mini" and len(lista_adjuntos) > 4)
-                    else "high"
-                )
-                adjs_envio = (
-                    lista_adjuntos[:34]
-                    if (mod_actual == "gpt-4o-mini" and len(lista_adjuntos) > 34)
-                    else lista_adjuntos
-                )
+                # Peticiones gigantes (decenas de diapositivas en alta detalle)
+                # provocan HTTP 429 por límite de tokens/minuto: se empieza
+                # con detalle alto solo si hay pocas imágenes, y cada reintento
+                # con otro modelo reduce imágenes y detalle.
+                det_img = "high" if len(lista_adjuntos) <= 10 else "low"
+                if mod_actual == "gpt-4o-mini":
+                    det_img = "low"
+                limite_adj = 28 if mod_actual == modelos_candidatos[0] else 16
+                adjs_envio = lista_adjuntos[:limite_adj]
                 contenido_usr = _construir_contenido_usuario_openai(
                     mensaje_usuario, adjs_envio, detalle_imagen=det_img
                 )
@@ -2742,8 +2752,13 @@ def sintetizar_con_ia(
                     break
                 except urllib.error.HTTPError as err_oa:
                     ultimo_err = err_oa
-                    if err_oa.code in (401, 429):
+                    if err_oa.code == 401:
                         raise
+                    if err_oa.code == 429:
+                        # Límite temporal: NO rendirse. Se prueba el siguiente
+                        # modelo con menos imágenes/detalle, y si OpenAI sigue
+                        # saturado se cae a Gemini (abajo) si hay clave.
+                        continue
                     if err_oa.code == 400 and any(a.mime == "application/pdf" for a in adjs_envio):
                         imgs_pdf: List[AdjuntoIA] = []
                         for adj in adjs_envio:
@@ -2783,21 +2798,30 @@ def sintetizar_con_ia(
                     continue
 
             if datos is None:
-                if isinstance(ultimo_err, urllib.error.HTTPError):
+                # OpenAI saturado (429 en todos los modelos): si también hay
+                # clave de Gemini en .env, se continúa con Gemini en vez de
+                # dejar al usuario con el documento en crudo.
+                clave_gemini = _leer_clave_env_local("GEMINI_API_KEY")
+                if clave_gemini and isinstance(ultimo_err, urllib.error.HTTPError) \
+                        and ultimo_err.code == 429:
+                    proveedor, api_key = "Gemini", clave_gemini
+                elif isinstance(ultimo_err, urllib.error.HTTPError):
                     raise ultimo_err
-                if ultimo_err:
+                elif ultimo_err:
                     raise ultimo_err
-                return ("", proveedor, "No se obtuvo respuesta de OpenAI.")
+                else:
+                    return ("", proveedor, "No se obtuvo respuesta de OpenAI.")
 
-            texto = (
-                datos.get("choices", [{}])[0]
-                .get("message", {})
-                .get("content", "")
-                .strip()
-            )
-            if texto.upper() == MARCA_NO_DISPONIBLE or texto.upper().startswith("NO_DISPONIBLE\n"):
-                return (MARCA_NO_DISPONIBLE, f"OpenAI · {modelo_usado}", "")
-            return (texto, f"OpenAI · {modelo_usado}", "")
+            if proveedor == "OpenAI" and datos is not None:
+                texto = (
+                    datos.get("choices", [{}])[0]
+                    .get("message", {})
+                    .get("content", "")
+                    .strip()
+                )
+                if texto.upper() == MARCA_NO_DISPONIBLE or texto.upper().startswith("NO_DISPONIBLE\n"):
+                    return (MARCA_NO_DISPONIBLE, f"OpenAI · {modelo_usado}", "")
+                return (texto, f"OpenAI · {modelo_usado}", "")
 
         if proveedor == "Gemini":
             modelo = _leer_clave_env_local("GEMINI_MODEL") or "gemini-2.5-flash"
@@ -2806,7 +2830,7 @@ def sintetizar_con_ia(
                 f"{modelo}:generateContent"
             )
             partes_usr: List[Dict] = [{"text": mensaje_usuario}]
-            for adj in lista_adjuntos:
+            for adj in lista_adjuntos[:20]:
                 if adj.etiqueta_previa:
                     partes_usr.append({"text": adj.etiqueta_previa})
                 partes_usr.append({
@@ -2986,6 +3010,11 @@ def construir_manual_desde_respuesta(respuesta: RespuestaAsistente) -> ManualEst
     doc_dominante = pasajes_fuente[0].doc_id if pasajes_fuente else None
     if doc_dominante is not None:
         pasajes_fuente = [p for p in pasajes_fuente if p.doc_id == doc_dominante]
+    es_manual_visual = any(
+        (p.titulo_seccion or "").lower().startswith("diapositiva")
+        or p.tipo_documento in ("pptx", "pdf")
+        for p in pasajes_fuente
+    )
 
     for pasaje in pasajes_fuente[:14]:
         if pasaje.sin_texto_ocr:
@@ -3029,6 +3058,8 @@ def construir_manual_desde_respuesta(respuesta: RespuestaAsistente) -> ManualEst
                 continue
             if normalizar(s) in (normalizar(titulo_fase), normalizar(pasaje.titulo_documento)):
                 continue
+            if normalizar(s) == normalizar(_titulo_bonito_manual(pasaje.titulo_documento)):
+                continue  # la portada del manual no es un paso
             if _es_linea_saludo_o_cortesia(s):
                 continue
             es_explicita = bool(
@@ -3074,7 +3105,10 @@ def construir_manual_desde_respuesta(respuesta: RespuestaAsistente) -> ManualEst
                     continue
             else:
                 contenido = s
-                es_fragmento_diapositiva = titulo_fase.lower().startswith("diapositiva")
+                es_fragmento_diapositiva = (
+                    titulo_fase.lower().startswith("diapositiva")
+                    or (es_manual_visual and len(contenido) <= 70)
+                )
                 if not _es_unidad_accionable(contenido) and not es_fragmento_diapositiva:
                     # Prosa suelta (saludos, criterios, contexto): jamás Paso 1.
                     # Como mucho, detalle corto bajo el paso anterior.

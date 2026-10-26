@@ -14,6 +14,7 @@ from modulos.asistente_inicio import (
     MARCA_NO_DISPONIBLE,
     RespuestaAsistente,
     buscar_procedimiento_confirmado,
+    buscar_pasajes_biblioteca,
     construir_contexto_conversacional,
     construir_manual_desde_respuesta,
     consultar_base_local,
@@ -779,6 +780,111 @@ class AsistenteIATests(unittest.TestCase):
             self.assertIsNotNone(recuperado)
             self.assertIn("Inventario", recuperado[0])
             self.assertEqual(recuperado[1], "OpenAI · gpt-4o-mini")
+
+
+class ResilienciaManualVisualTests(unittest.TestCase):
+    """El caso de la captura real: manual visual (PPT) dentro/fuera de correo
+    y OpenAI devolviendo 429. La hoja debe salir igual."""
+
+    def _mock_ok_openai(self, contenido="# Manual paso a paso: Conciliación\n1. Entrar en ERP."):
+        mock_http = MagicMock()
+        mock_http.read.return_value = json.dumps(
+            {"choices": [{"message": {"content": contenido}}]}
+        ).encode("utf-8")
+        mock_http.__enter__.return_value = mock_http
+        return mock_http
+
+    def test_openai_429_prueba_el_siguiente_modelo(self):
+        import io
+
+        err429 = urllib.error.HTTPError(
+            "https://api.openai.com", 429, "Too Many", {}, io.BytesIO(b"{}")
+        )
+        claves = {"OPENAI_API_KEY": "sk-test", "OPENAI_MODEL": "", "GEMINI_API_KEY": ""}
+        with patch("modulos.asistente_inicio._leer_clave_env_local",
+                   side_effect=lambda n: claves.get(n, "")):
+            with patch("urllib.request.urlopen",
+                       side_effect=[err429, self._mock_ok_openai()]) as mock_open:
+                texto, prov, aviso = sintetizar_con_ia(
+                    "¿Cómo se hace la conciliación de inventario?",
+                    "[DOCUMENTO 1: Conciliación]\n1. Entrar en ERP.",
+                )
+        self.assertIn("Manual paso a paso", texto)
+        self.assertIn("gpt-4o-mini", prov)
+        self.assertEqual(mock_open.call_count, 2)
+
+    def test_openai_429_en_todos_cae_a_gemini_si_hay_clave(self):
+        import io
+
+        def _fake_urlopen(req, timeout=None, context=None):
+            if "generativelanguage" in req.full_url:
+                mock_g = MagicMock()
+                mock_g.read.return_value = json.dumps({
+                    "candidates": [{"content": {"parts": [
+                        {"text": "# Manual paso a paso: Conciliación\n1. Entrar en ERP."}
+                    ]}}]
+                }).encode("utf-8")
+                mock_g.__enter__.return_value = mock_g
+                return mock_g
+            raise urllib.error.HTTPError(
+                req.full_url, 429, "Too Many", {}, io.BytesIO(b"{}")
+            )
+
+        claves = {
+            "OPENAI_API_KEY": "sk-test", "GEMINI_API_KEY": "gem-test",
+            "OPENAI_MODEL": "", "GEMINI_MODEL": "",
+        }
+        with patch("modulos.asistente_inicio._leer_clave_env_local",
+                   side_effect=lambda n: claves.get(n, "")):
+            with patch("urllib.request.urlopen", side_effect=_fake_urlopen):
+                texto, prov, aviso = sintetizar_con_ia(
+                    "¿Cómo se hace la conciliación de inventario?",
+                    "[DOCUMENTO 1: Conciliación]\n1. Entrar en ERP.",
+                )
+        self.assertIn("Manual paso a paso", texto)
+        self.assertIn("Gemini", prov)
+
+    def test_correo_con_presentacion_solo_aporta_las_diapositivas(self):
+        class _Res:
+            id = 7
+
+        ficha = dict(
+            id=7, titulo="Mail tipo día antes de la toma de inventarios",
+            tipo="correo", archivo="mail.eml", fecha_doc="2026-10-20",
+            categoria="Inventario y activos", remitente="sede@example.com",
+            estado="NORMAL", importancia=80.0,
+            texto=(
+                "Buen día estimados,\n"
+                "Espero estén bien. Hoy se llevará la toma de inventarios "
+                "bajo los siguientes criterios generales.\n"
+                "Un saludo\n\n"
+                "[Adjunto: Conciliacion_de_inventarios.pptx]\n"
+                "--- Diapositiva 1 ---\nConciliación de inventarios\n"
+                "--- Diapositiva 2 ---\n"
+                "1. Entrar en ERP Global (PeopleSoft) y pulsar Conectar.\n"
+                "2. Ir a Almacenes -> Conciliación de Inventarios.\n"
+                "3. Pulsar Procesar y Guardar."
+            ),
+        )
+
+        class _BibFake:
+            def listar(self, filtro="todos", limite=500):
+                return [_Res()]
+
+            def obtener(self, doc_id):
+                return ficha
+
+        _, ranuras = extraer_terminos_consulta("¿Cómo se hace la conciliación de inventario?")
+        pasajes = buscar_pasajes_biblioteca(
+            _BibFake(), "¿Cómo se hace la conciliación de inventario?", ranuras
+        )
+        self.assertTrue(pasajes)
+        self.assertTrue(all(
+            p.titulo_seccion.lower().startswith("diapositiva") for p in pasajes
+        ))
+        unido = "\n".join(p.texto_seccion for p in pasajes)
+        self.assertNotIn("Buen día", unido)
+        self.assertIn("PeopleSoft", unido)
 
 
 class InicioInterfazChatTests(unittest.TestCase):
