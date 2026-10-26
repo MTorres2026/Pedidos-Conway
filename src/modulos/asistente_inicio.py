@@ -838,7 +838,7 @@ def buscar_pasajes_biblioteca(
         r for r in ranuras if not any(v in SUSTANTIVOS_CALIFICABLES for v in r)
     ] or list(ranuras)
 
-    candidatos_doc: List[Tuple[float, List[PasajeManual], bool]] = []
+    candidatos_doc: List[Tuple[float, List[PasajeManual], bool, bool]] = []
 
     for ficha in fichas:
         doc_id = int(ficha["id"])
@@ -905,6 +905,7 @@ def buscar_pasajes_biblioteca(
                     )
                 ],
                 True,
+                tipo_doc != "correo",
             ))
             continue
 
@@ -1007,6 +1008,11 @@ def buscar_pasajes_biblioteca(
             pts_doc = mejor_sec_pts + bono_dedicado + _bono_recencia(fecha_doc)
             if tipo_doc != "correo":
                 pts_doc += 18.0  # un manual suelto manda sobre cualquier correo
+            if es_titulo_exacto and tipo_doc in ("pptx", "pdf", "docx"):
+                # Manual visual exacto del proceso: aunque sus pasos estén en
+                # capturas (poco texto), es EL manual y debe ganar siempre a
+                # cualquier correo/PDF que solo menciona el proceso con texto.
+                pts_doc += 45.0
             elif adjunto_exacto_idx is None:
                 pts_doc -= 30.0  # correo que solo menciona el proceso, no el manual
             if estado_doc == "DESTACADO":
@@ -1027,7 +1033,10 @@ def buscar_pasajes_biblioteca(
                 )
                 for _, _, t_s, c_s in elegidas
             ]
-            candidatos_doc.append((pts_doc, pasajes_doc, bool(es_titulo_exacto)))
+            candidatos_doc.append((
+                pts_doc, pasajes_doc, bool(es_titulo_exacto),
+                bool(es_titulo_exacto and tipo_doc != "correo"),
+            ))
             continue
 
         # Si NO es un manual dedicado por su nombre (ej. un manual grande de "Cinema Manager"
@@ -1144,12 +1153,14 @@ def buscar_pasajes_biblioteca(
             )
             for _, t_s, c_s, p_s in elegidas_sec[:3]
         ]
-        candidatos_doc.append((mejor_pts, pasajes_doc, False))
+        candidatos_doc.append((mejor_pts, pasajes_doc, False, False))
 
     if not candidatos_doc:
         return []
 
-    candidatos_doc.sort(key=lambda par: par[0], reverse=True)
+    # Prioridad absoluta: un manual suelto cuyo título ES el proceso pedido
+    # gana siempre, aunque un correo tenga más texto «rico» y él sea visual.
+    candidatos_doc.sort(key=lambda par: (par[3], par[0]), reverse=True)
     # Si el ganador es el manual dedicado exacto del proceso, es el ÚNICO
     # que se muestra: mezclar un segundo documento (un correo, un aviso…)
     # contaminaba la hoja con saludos y criterios ajenos al procedimiento.
@@ -1160,7 +1171,7 @@ def buscar_pasajes_biblioteca(
         candidatos_doc = [c for c in candidatos_doc if c[0] >= tope * 0.65]
 
     salida: List[PasajeManual] = []
-    for pos, (_, lista_p, _exacto) in enumerate(candidatos_doc[:max_documentos]):
+    for pos, (_, lista_p, _exacto, _exacto_no_correo) in enumerate(candidatos_doc[:max_documentos]):
         if pos == 0:
             salida.extend(lista_p[:65])
         else:

@@ -952,6 +952,50 @@ class ResilienciaManualVisualTests(unittest.TestCase):
         self.assertNotIn("GUÍA EXTRAÍDA", html_out)
 
 
+    def test_manual_visual_exacto_gana_a_correo_con_mucho_texto(self):
+        fichas = {
+            1: dict(
+                id=1, titulo="Mail tipo día antes de la toma de inventarios",
+                tipo="pdf", archivo="mail.pdf", fecha_doc="2026-10-20",
+                categoria="Inventario y activos", remitente="sede@example.com",
+                estado="NORMAL", importancia=95.0,
+                texto=(
+                    "TOMA DE INVENTARIOS - CRITERIOS\n"
+                    "• Stock Location Status de la conciliación de inventario.\n"
+                    "• Carga de salida de la conciliación de inventario.\n"
+                    "• Informe de Conciliación de inventario completo.\n"
+                    "• Hora de finalización de la conciliación, antes 1:00pm.\n"
+                    "• Revisar y verificar cada punto en ERP y Vista."
+                ),
+            ),
+            2: dict(
+                id=2, titulo="170608 Conciliación de inventarios",
+                tipo="pptx", archivo="170608_Conciliacion_de_inventarios.pptx",
+                fecha_doc="2017-06-08", categoria="Inventario y activos",
+                remitente="", estado="NORMAL", importancia=40.0,
+                texto="--- Diapositiva 1 ---\nConciliación de inventarios",
+            ),
+        }
+
+        class _Res:
+            def __init__(self, i):
+                self.id = i
+
+        class _BibFake:
+            def listar(self, filtro="todos", limite=500):
+                return [_Res(1), _Res(2)]
+
+            def obtener(self, doc_id):
+                return fichas[doc_id]
+
+        _, ranuras = extraer_terminos_consulta("¿Cómo se hace la conciliación de inventario?")
+        pasajes = buscar_pasajes_biblioteca(
+            _BibFake(), "¿Cómo se hace la conciliación de inventario?", ranuras
+        )
+        self.assertTrue(pasajes)
+        self.assertTrue(all(p.doc_id == 2 for p in pasajes))
+
+
 class InicioInterfazChatTests(unittest.TestCase):
     def _cargar_modulo_inicio(self):
         import importlib

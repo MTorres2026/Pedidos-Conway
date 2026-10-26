@@ -14,6 +14,7 @@ Cómo responde a cada pregunta del equipo:
 from __future__ import annotations
 
 import html
+import re
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
