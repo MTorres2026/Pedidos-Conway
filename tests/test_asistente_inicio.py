@@ -402,6 +402,136 @@ class HojasWordManualesTests(AsistentePrecisionEstrictaTests):
             self.assertGreaterEqual(hoja.n_pasos, 2)
 
 
+class ManualRealFrenteACorreosTests(unittest.TestCase):
+    """Regla general: si hay manual real, se muestra ESE manual paso a paso,
+    nunca el saludo/criterios de un correo que solo menciona el proceso."""
+
+    CORREO_SEDE = (
+        "Buen día estimados,\n\n"
+        "Espero estén teniendo un excelente día, les comento que el día de hoy "
+        "se llevara la Toma de Inventarios bajo los siguientes criterios: "
+        "Recomendaciones: No deben contar con recepciones pendientes en ninguno "
+        "de los sistemas (ERP - VISTA). Las cargas de salida deben estar "
+        "completas. Registrar su Toma de Inventarios EN BASE A LAS EXISTENCIAS "
+        "FISICAS, validando la unidad de medida. Al final mencionamos la "
+        "conciliación de inventario solo como aviso general para gerencia.\n\n"
+        "Un saludo\n"
+    )
+
+    MANUAL_CONCILIACION_ERP = (
+        "CONCILIACIÓN DE INVENTARIOS EN ERP\n"
+        "1. Entrar en ERP Global (PeopleSoft) con usuario y contraseña y pulsar Conectar.\n"
+        "2. Ir a Menú Principal -> Almacenes -> Recuentos de Inventario -> Conciliación de Inventarios.\n"
+        "3. Seleccionar el ID Evento Ejecución y pulsar Procesar conciliación.\n"
+        "4. Revisar la columna Variación y recontar las referencias con diferencias.\n"
+        "5. Pulsar Guardar y verificar que el estado queda Conciliado.\n"
+    )
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.raiz = Path(self.tmp.name)
+        self.bib = Biblioteca(self.raiz / "bib")
+        self.addCleanup(self.bib.cerrar)
+        self._ocr = patch.object(self.bib, "_ocr_callable", return_value=None)
+        self._ocr.start()
+        self.addCleanup(self._ocr.stop)
+
+        correo = self.raiz / "mail_sede.eml"
+        correo.write_text(
+            "Subject: Mail tipo día antes de la toma de inventarios\n"
+            "From: sede@example.com\n"
+            "Content-Type: text/plain; charset=utf-8\n\n" + self.CORREO_SEDE,
+            encoding="utf-8",
+        )
+        self.bib.agregar_archivo(correo)
+
+        manual = self.raiz / "170608_Conciliacion_de_inventarios.txt"
+        manual.write_text(self.MANUAL_CONCILIACION_ERP, encoding="utf-8")
+        self.id_manual_conciliacion = self.bib.agregar_archivo(manual).id
+
+        mermas = self.raiz / "Manual_Registro_Mermas.txt"
+        mermas.write_text(
+            "REGISTRO DE MERMAS EN CINEMA MANAGER\n"
+            "1. Entrar en Cinema Manager -> Almacén -> Mermas.\n"
+            "2. Pulsar Nueva merma y seleccionar el artículo dañado.\n"
+            "3. Elegir el motivo Rotura o Caducidad y escribir la cantidad.\n"
+            "4. Pulsar Guardar y comprobar que la merma queda registrada.\n",
+            encoding="utf-8",
+        )
+        self.id_manual_mermas = self.bib.agregar_archivo(mermas).id
+
+    def test_conciliacion_muestra_el_manual_erp_no_el_correo_de_sede(self):
+        resp = consultar_base_local("¿Cómo se hace la conciliación de inventario?", self.bib)
+        self.assertTrue(resp.pasajes)
+        self.assertTrue(all(p.doc_id == self.id_manual_conciliacion for p in resp.pasajes))
+
+        manual = construir_manual_desde_respuesta(resp)
+        acciones = [p.accion for f in manual.fases for p in f.pasos]
+        self.assertGreaterEqual(len(acciones), 4)
+        self.assertIn("PeopleSoft", acciones[0])
+
+        html_out = renderizar_respuesta_asistente_html(resp, turno_id=3)
+        self.assertIn("HOJA DE MANUAL OPERATIVO", html_out)
+        self.assertIn("PeopleSoft", html_out)
+        self.assertNotIn("Buen día", html_out)
+        self.assertNotIn("Mail tipo", html_out)
+
+    def test_cualquier_proceso_con_manual_gana_a_los_correos(self):
+        resp = consultar_base_local("¿Cómo se registran las mermas?", self.bib)
+        self.assertTrue(resp.pasajes)
+        self.assertEqual(resp.pasajes[0].doc_id, self.id_manual_mermas)
+        html_out = renderizar_respuesta_asistente_html(resp, turno_id=4)
+        self.assertIn("Nueva merma", html_out)
+        self.assertNotIn("Buen día", html_out)
+
+    def test_manual_adjunto_dentro_de_un_correo_se_usa_sin_el_saludo(self):
+        from email.message import EmailMessage
+
+        bib_adj = Biblioteca(self.raiz / "bib_adj")
+        self.addCleanup(bib_adj.cerrar)
+        with patch.object(bib_adj, "_ocr_callable", return_value=None):
+            msg = EmailMessage()
+            msg["Subject"] = "RV: Documentación inventarios"
+            msg["From"] = "sede@example.com"
+            msg.set_content("Buen día estimados,\nAdjunto el manual.\nUn saludo")
+            msg.add_attachment(
+                self.MANUAL_CONCILIACION_ERP.encode("utf-8"),
+                maintype="text", subtype="plain",
+                filename="Conciliacion_de_inventarios.txt",
+            )
+            fwd = self.raiz / "fwd.eml"
+            fwd.write_bytes(msg.as_bytes())
+            bib_adj.agregar_archivo(fwd)
+
+        resp = consultar_base_local("¿Cómo se hace la conciliación de inventario?", bib_adj)
+        self.assertTrue(resp.pasajes)
+        html_out = renderizar_respuesta_asistente_html(resp, turno_id=5)
+        self.assertIn("PeopleSoft", html_out)
+        self.assertNotIn("Buen día", html_out)
+
+    def test_sin_manual_el_correo_amable_no_se_disfraza_de_manual(self):
+        bib_solo_correo = Biblioteca(self.raiz / "bib_solo_correo")
+        self.addCleanup(bib_solo_correo.cerrar)
+        with patch.object(bib_solo_correo, "_ocr_callable", return_value=None):
+            correo = self.raiz / "solo_mail.eml"
+            correo.write_text(
+                "Subject: Mail tipo día antes de la toma de inventarios\n"
+                "From: sede@example.com\n"
+                "Content-Type: text/plain; charset=utf-8\n\n" + self.CORREO_SEDE,
+                encoding="utf-8",
+            )
+            bib_solo_correo.agregar_archivo(correo)
+
+        resp = consultar_base_local(
+            "¿Cómo se hace la conciliación de inventario?", bib_solo_correo
+        )
+        self.assertFalse(resp.tiene_contenido)
+        html_out = renderizar_respuesta_asistente_html(resp)
+        self.assertIn("PROCEDIMIENTO NO DISPONIBLE", html_out)
+        self.assertNotIn("Buen día", html_out)
+
+
 class AsistenteIATests(unittest.TestCase):
     def test_verificador_ia_devuelve_no_disponible_cuando_contexto_no_corresponde(self):
         respuesta_falsa = {

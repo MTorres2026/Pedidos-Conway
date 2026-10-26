@@ -144,6 +144,10 @@ def _raiz_busqueda(termino: str) -> str:
             return t[:-corte]
     if len(t) >= 6 and t.endswith(("ar", "er", "ir")):
         return t[:-2]
+    # Conjugaciones en 3ª persona del plural: registran -> registr-,
+    # hacen -> hac-, para casar con registrar/registro, hacer/hecho, etc.
+    if len(t) >= 7 and t.endswith(("an", "en")) and not t.endswith(("man", "men")):
+        return t[:-2]
     if len(t) >= 8 and t.endswith(("o", "a")):
         return t[:-1]
     return t
@@ -747,6 +751,12 @@ def _es_contenido_instructivo(texto: str, tipo_doc: str) -> bool:
         return sum(1 for ln in texto.splitlines() if _RX_PASO_ESTRICTO.match(ln)) >= 2
 
     n_pasos = sum(1 for ln in texto.splitlines() if _RX_PASO_ESTRICTO.match(ln))
+    if tipo_doc == "correo":
+        # Un correo solo cuenta como manual si trae instrucciones explícitas
+        # paso a paso. La prosa amable («Buen día estimados… hoy se llevará
+        # la toma de inventarios bajo los siguientes criterios…») NO es un
+        # manual, aunque mencione el proceso de pasada.
+        return n_pasos >= 2 or (n_pasos >= 1 and len(_RX_VERBOS_OPERATIVOS.findall(normalizar(texto))) >= 2)
     if n_pasos >= 2:
         return True
 
@@ -760,6 +770,52 @@ def _es_contenido_instructivo(texto: str, tipo_doc: str) -> bool:
         return True
 
     return False
+
+
+_RX_SALUDO_CORREO = re.compile(
+    r"^(buen(?:os)?\s+dias?|buenas?\s+(?:tardes?|noches?)|estimad[oa]s?|"
+    r"hola\s+(?:equipo|a\s+todos|compañeros)|espero\s+(?:esten|esteis|se\s+encuentren|teng)|"
+    r"les\s+comento|os\s+comento|te\s+comento|un\s+saludo|saludos?\s+cordiales|"
+    r"quedo\s+atent|atentamente|gracias\s+por\s+(?:su|vuestra)|de\s*:|para\s*:|"
+    r"cc\s*:|asunto\s*:|enviado\s*:|remitente\s*:)",
+    re.IGNORECASE,
+)
+
+_RX_ACCIONABLE_EXTRA = re.compile(
+    r"\b(abrir|abre|cerrar|cierra|escribir|escribe|elegir|elige|marcar|marca|"
+    r"rellenar|rellena|completar|completa|buscar|busca|crear|crea|generar|genera|"
+    r"registrar|registra|realizar|realiza|enviar|envia|calcular|calcula|confirmar|confirma|"
+    r"bloquear|bloquea|tomar|toma|iniciar|inicia|acceder|accede|entrar|entra|"
+    r"debe|deben|debera|deberan|hay\s+que|es\s+necesario|no\s+debe|antes\s+de|"
+    r"pulsar|pulsa|pantalla|menu|boton|campo|pestana|modulo|sistema)\b"
+)
+
+
+def _es_linea_saludo_o_cortesia(texto: str) -> bool:
+    return bool(_RX_SALUDO_CORREO.match(normalizar(texto or "")))
+
+
+def _es_unidad_accionable(texto: str) -> bool:
+    norm = normalizar(texto or "")
+    if not norm or _RX_SALUDO_CORREO.match(norm):
+        return False
+    return bool(_RX_VERBOS_OPERATIVOS.search(norm) or _RX_ACCIONABLE_EXTRA.search(norm))
+
+
+def _seccion_es_correo_sin_pasos(titulo_sec: str, texto_sec: str) -> bool:
+    """True si la sección es el cuerpo amable de un correo, no un manual."""
+    if (titulo_sec or "").lower().startswith(("adjunto:", "archivo:")):
+        return False
+    lineas = [ln.strip() for ln in (texto_sec or "").splitlines() if ln.strip()]
+    if not lineas:
+        return True
+    n_pasos = sum(1 for ln in lineas if _RX_PASO_ESTRICTO.match(ln))
+    if n_pasos >= 2:
+        return False
+    primeras = " ".join(lineas[:2])
+    return _es_linea_saludo_o_cortesia(primeras) or (
+        len(lineas) <= 3 and len(texto_sec or "") > 240 and n_pasos == 0
+    )
 
 
 def buscar_pasajes_biblioteca(
@@ -781,7 +837,7 @@ def buscar_pasajes_biblioteca(
         r for r in ranuras if not any(v in SUSTANTIVOS_CALIFICABLES for v in r)
     ] or list(ranuras)
 
-    candidatos_doc: List[Tuple[float, List[PasajeManual]]] = []
+    candidatos_doc: List[Tuple[float, List[PasajeManual], bool]] = []
 
     for ficha in fichas:
         doc_id = int(ficha["id"])
@@ -847,6 +903,7 @@ def buscar_pasajes_biblioteca(
                         sin_texto_ocr=True,
                     )
                 ],
+                True,
             ))
             continue
 
@@ -898,7 +955,29 @@ def buscar_pasajes_biblioteca(
                 for _, _, tit_s, _ in secciones_puntuadas
             )
 
+            # Si un correo reenvía un manual adjunto, solo vale el adjunto:
+            # el cuerpo amable del correo (saludo, criterios, firma) nunca
+            # debe convertirse en los «pasos» de la hoja.
+            adjunto_exacto_idx: Optional[int] = None
+            if tipo_doc == "correo":
+                for s_pts, s_idx, s_tit, _s_txt in secciones_puntuadas:
+                    if s_tit.lower().startswith(("adjunto:", "archivo:")) and all(
+                        _ranura_coincide_en(r, normalizar(s_tit)) for r in ranuras
+                    ):
+                        adjunto_exacto_idx = s_idx
+                        break
+                if adjunto_exacto_idx is not None:
+                    secciones_puntuadas = [
+                        s for s in secciones_puntuadas if s[1] >= adjunto_exacto_idx
+                    ]
+
             con_chicha = [s for s in secciones_puntuadas if s[0] >= 55.0] or secciones_puntuadas
+            sin_sobres = [
+                s for s in con_chicha
+                if not _seccion_es_correo_sin_pasos(s[2], s[3])
+            ]
+            if sin_sobres:
+                con_chicha = sin_sobres
             con_chicha_ord_pts = sorted(con_chicha, key=lambda x: x[0], reverse=True)
             mejor_sec_pts = con_chicha_ord_pts[0][0]
 
@@ -914,6 +993,10 @@ def buscar_pasajes_biblioteca(
 
             bono_dedicado = 35.0 if es_titulo_exacto else 22.0
             pts_doc = mejor_sec_pts + bono_dedicado + _bono_recencia(fecha_doc)
+            if tipo_doc != "correo":
+                pts_doc += 18.0  # un manual suelto manda sobre cualquier correo
+            elif adjunto_exacto_idx is None:
+                pts_doc -= 30.0  # correo que solo menciona el proceso, no el manual
             if estado_doc == "DESTACADO":
                 pts_doc += 6.0
 
@@ -932,7 +1015,7 @@ def buscar_pasajes_biblioteca(
                 )
                 for _, _, t_s, c_s in elegidas
             ]
-            candidatos_doc.append((pts_doc, pasajes_doc))
+            candidatos_doc.append((pts_doc, pasajes_doc, bool(es_titulo_exacto)))
             continue
 
         # Si NO es un manual dedicado por su nombre (ej. un manual grande de "Cinema Manager"
@@ -976,6 +1059,21 @@ def buscar_pasajes_biblioteca(
                 _contar_ocurrencias_ranura(r, norm_cuerpo) for r in ranuras_especificas
             )
 
+            # Foco temático real: cada concepto de la pregunta debe ser central
+            # en ESTA sección (en su título o repetido en el cuerpo), no basta
+            # que el documento lo mencione una vez entre saludos y criterios.
+            # Así un «Mail tipo día antes de la toma de inventarios» jamás
+            # gana a un manual de conciliación, mermas, albaranes, etc.
+            if n_ranuras >= 2 and especificas_en_tit_sec == 0 and especificas_en_cabecera_doc == 0:
+                ocurrencias_por_ranura = [
+                    _contar_ocurrencias_ranura(r, norm_sec) for r in ranuras_especificas
+                ]
+                if ocurrencias_por_ranura and min(ocurrencias_por_ranura) < 2:
+                    continue
+            if tipo_doc == "correo" and not norm_tit_sec.startswith(("adjunto", "archivo")):
+                if _seccion_es_correo_sin_pasos(tit_sec, txt_sec):
+                    continue
+
             if not es_contenedor_neutro and especificas_en_tit_sec == 0:
                 # Tiene título propio de otra sección ("10. Cierre de Día"): solo aceptar si
                 # el tema aparece de forma central/reiterada (>=3 líneas) y el doc es del área
@@ -1000,6 +1098,8 @@ def buscar_pasajes_biblioteca(
                     continue
 
             pts_s += _bono_recencia(fecha_doc) + min(importancia_doc * 0.1, 4.0)
+            if tipo_doc == "correo":
+                pts_s -= 25.0
             if estado_doc == "DESTACADO":
                 pts_s += 5.0
 
@@ -1032,17 +1132,23 @@ def buscar_pasajes_biblioteca(
             )
             for _, t_s, c_s, p_s in elegidas_sec[:3]
         ]
-        candidatos_doc.append((mejor_pts, pasajes_doc))
+        candidatos_doc.append((mejor_pts, pasajes_doc, False))
 
     if not candidatos_doc:
         return []
 
     candidatos_doc.sort(key=lambda par: par[0], reverse=True)
-    tope = candidatos_doc[0][0]
-    candidatos_doc = [c for c in candidatos_doc if c[0] >= tope * 0.65]
+    # Si el ganador es el manual dedicado exacto del proceso, es el ÚNICO
+    # que se muestra: mezclar un segundo documento (un correo, un aviso…)
+    # contaminaba la hoja con saludos y criterios ajenos al procedimiento.
+    if candidatos_doc[0][2]:
+        candidatos_doc = candidatos_doc[:1]
+    else:
+        tope = candidatos_doc[0][0]
+        candidatos_doc = [c for c in candidatos_doc if c[0] >= tope * 0.65]
 
     salida: List[PasajeManual] = []
-    for pos, (_, lista_p) in enumerate(candidatos_doc[:max_documentos]):
+    for pos, (_, lista_p, _exacto) in enumerate(candidatos_doc[:max_documentos]):
         if pos == 0:
             salida.extend(lista_p[:65])
         else:
@@ -2873,15 +2979,39 @@ def construir_manual_desde_respuesta(respuesta: RespuestaAsistente) -> ManualEst
         manual.notas_importantes.extend(p.advertencias)
         textos_fuente.append(f"{p.titulo} {p.objetivo} {' '.join(p.pasos)}")
 
-    for pasaje in (respuesta.pasajes or [])[:14]:
+    # La hoja se construye SOLO con el documento ganador (el primer pasaje):
+    # mezclar pasajes de un segundo documento metía saludos de correos y
+    # criterios de otros procesos en medio del manual pedido.
+    pasajes_fuente = list(respuesta.pasajes or [])
+    doc_dominante = pasajes_fuente[0].doc_id if pasajes_fuente else None
+    if doc_dominante is not None:
+        pasajes_fuente = [p for p in pasajes_fuente if p.doc_id == doc_dominante]
+
+    for pasaje in pasajes_fuente[:14]:
         if pasaje.sin_texto_ocr:
             continue
         texto_sec = (pasaje.texto_seccion or "").strip()
         if not texto_sec:
             continue
+        if _seccion_es_correo_sin_pasos(pasaje.titulo_seccion, texto_sec) and len(pasajes_fuente) > 1:
+            continue
         textos_fuente.append(f"{pasaje.titulo_documento} {pasaje.titulo_seccion} {texto_sec[:1200]}")
         if not manual.titulo:
-            manual.titulo = _titulo_bonito_manual(pasaje.titulo_documento)
+            titulo_doc_norm = normalizar(pasaje.titulo_documento)
+            es_titulo_correo = (
+                pasaje.tipo_documento == "correo"
+                or titulo_doc_norm.startswith(("mail", "correo", "aviso", "re ", "rv ", "fw "))
+            )
+            if es_titulo_correo:
+                # El título de la hoja es el proceso, no el asunto del correo
+                titulo_adjunto = ""
+                if (pasaje.titulo_seccion or "").lower().startswith(("adjunto:", "archivo:")):
+                    titulo_adjunto = _titulo_bonito_manual(
+                        pasaje.titulo_seccion.split(":", 1)[1]
+                    )
+                manual.titulo = titulo_adjunto  # si no hay adjunto, manda la pregunta
+            else:
+                manual.titulo = _titulo_bonito_manual(pasaje.titulo_documento)
         titulo_fase = (pasaje.titulo_seccion or "").strip()
         if not titulo_fase or normalizar(titulo_fase) == normalizar(pasaje.titulo_documento):
             titulo_fase = "Procedimiento paso a paso"
@@ -2891,6 +3021,7 @@ def construir_manual_desde_respuesta(respuesta: RespuestaAsistente) -> ManualEst
         )
         vistos_fase: Set[str] = set()
 
+        unidades: List[str] = []
         for cruda in texto_sec.splitlines():
             s = _limpiar_marcas_texto_plano(cruda)
             s = re.sub(r"^[▪▸◆●◦]\s*", "", s).strip()
@@ -2898,6 +3029,22 @@ def construir_manual_desde_respuesta(respuesta: RespuestaAsistente) -> ManualEst
                 continue
             if normalizar(s) in (normalizar(titulo_fase), normalizar(pasaje.titulo_documento)):
                 continue
+            if _es_linea_saludo_o_cortesia(s):
+                continue
+            es_explicita = bool(
+                re.match(r"^(\d{1,3})[.)\-]\s+", s) or re.match(r"^[-•*]\s+", s)
+            )
+            if len(s) > 280 and not es_explicita:
+                # Párrafo largo de correo/PDF: solo sobreviven las frases que
+                # de verdad ordenan hacer algo; el saludo y la prosa, fuera.
+                frases = [
+                    f.strip() for f in re.split(r"(?<=[.!?])\s+", s) if f.strip()
+                ]
+                unidades.extend(f for f in frases if _es_unidad_accionable(f))
+            else:
+                unidades.append(s)
+
+        for s in unidades:
             norm_s = normalizar(s)
             if re.match(r"^(nota|importante|atencion|ojo|aviso|cuidado)\b", norm_s):
                 limpia_nota = re.sub(
@@ -2927,7 +3074,17 @@ def construir_manual_desde_respuesta(respuesta: RespuestaAsistente) -> ManualEst
                     continue
             else:
                 contenido = s
-                if fase.pasos and (contenido[:1].islower() or len(contenido) < 110):
+                es_fragmento_diapositiva = titulo_fase.lower().startswith("diapositiva")
+                if not _es_unidad_accionable(contenido) and not es_fragmento_diapositiva:
+                    # Prosa suelta (saludos, criterios, contexto): jamás Paso 1.
+                    # Como mucho, detalle corto bajo el paso anterior.
+                    if fase.pasos and len(contenido) < 110:
+                        clave_sub = normalizar(contenido)
+                        if clave_sub not in vistos_fase:
+                            vistos_fase.add(clave_sub)
+                            fase.pasos[-1].subpuntos.append(contenido)
+                    continue
+                if fase.pasos and contenido[:1].islower():
                     clave_sub = normalizar(contenido)
                     if clave_sub not in vistos_fase:
                         vistos_fase.add(clave_sub)
