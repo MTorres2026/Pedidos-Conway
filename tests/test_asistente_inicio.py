@@ -149,6 +149,59 @@ class AsistenteInicioLocalTests(unittest.TestCase):
         self.assertNotIn("<script>", html_out)
         self.assertIn("&lt;script&gt;", html_out)
 
+    def test_pdf_corporativo_separa_etv_de_cierre_dia_y_detecta_mencion_lateral(self):
+        pdf_cierre_con_ruido = """
+Confidencial
+4. Ingresar el folio del comprobante del servicio de ETV en el campo “Número de Placa de
+mensajero”.
+5. Presionar el botón “Enviar”.
+Nota: En caso de que la contrase ña o el PIN sean incorrectas, un mensaje aparecerá, presionar el
+botón “Ok” y corregir.
+6. En la ventana que se abre, presionar el botón “Enviar” para confirmar el envío de fondos.
+ESP-TLC-GC-CIMA-00 GC CINEMA MANAGER – VISTA CLOUD 04/11/2025 Página 21 de 29
+Confidencial
+Confidencial
+7. Verificar que en los ingresos se tenga un valor de €0.00 y que en la parte inferior aparezca un
+mensaje indicando que el depósito se envió exitosamente.
+10. Cierre de Día
+Después de que los fondos se hayan enviado, el cierre de día deberá realizarse de la siguiente manera:
+1. Si en el día actual se realizó toma de inventario, antes de cerrar el día, desde Gerencia se debe
+generar el reporte “Estado de Inventario” y validar que se haya finalizado.
+2. Presionar el botón “Día de cierre”.
+3. El sistema revisará que se tengan todas las condiciones necesarias para cerrar el día.
+""".strip()
+
+        secciones = dividir_documento_en_secciones(pdf_cierre_con_ruido)
+        self.assertEqual(len(secciones), 2)
+        self.assertEqual(secciones[1][0], "10. Cierre de Día")
+        self.assertNotIn("Placa de mensajero", secciones[1][1])
+        self.assertNotIn("Confidencial", secciones[1][1])
+        self.assertNotIn("Página 21 de 29", secciones[1][1])
+        self.assertIn("contraseña", secciones[0][1])
+
+        # Caso A: Biblioteca donde SOLO existe ese PDF de Cierre de Día -> detecta mención lateral sin ETV
+        bib_solo_cierre = Biblioteca(self.raiz / "bib_cierre")
+        self.addCleanup(bib_solo_cierre.cerrar)
+        with patch.object(bib_solo_cierre, "_ocr_callable", return_value=None):
+            f_cierre = self.raiz / "GC_CINEMA_MANAGER_VISTA_CLOUD.txt"
+            f_cierre.write_text(pdf_cierre_con_ruido, encoding="utf-8")
+            bib_solo_cierre.agregar_archivo(f_cierre)
+
+        resp_lateral = consultar_base_local("¿Cómo hago el inventario?", bib_solo_cierre)
+        self.assertTrue(resp_lateral.solo_mencion_lateral)
+        self.assertNotIn("Placa de mensajero", resp_lateral.pasajes[0].texto_seccion)
+        html_lat = renderizar_respuesta_asistente_html(resp_lateral)
+        self.assertIn("No hay un manual específico dedicado", html_lat)
+
+        # Caso B: Si además existe el manual real (como en self.bib), descarta por completo la mención lateral
+        with patch.object(self.bib, "_ocr_callable", return_value=None):
+            self.bib.agregar_archivo(f_cierre)
+        resp_directa = consultar_base_local("¿Cómo hago el inventario?", self.bib)
+        self.assertFalse(resp_directa.solo_mencion_lateral)
+        self.assertEqual(resp_directa.pasajes[0].doc_id, self.id_manual)
+        for pasaje in resp_directa.pasajes:
+            self.assertNotEqual(pasaje.titulo_seccion, "10. Cierre de Día")
+
 
 class AsistenteInicioIATests(unittest.TestCase):
     def test_sintetizar_con_openai_y_caida_segura_si_falla_red(self):

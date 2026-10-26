@@ -215,10 +215,10 @@ class Inicio(QWidget):
         layout.setContentsMargins(16, 14, 16, 14)
         layout.setSpacing(8)
 
-        # ----- Cabecera superior -----
+        # ----- Cabecera superior (adaptable a tema claro y oscuro de Windows) -----
         fila_cabecera = QHBoxLayout()
         titulo = QLabel("🏠 INICIO · Asistente del Cine")
-        titulo.setStyleSheet("font-size: 24px; font-weight: bold; color: #0F172A;")
+        titulo.setStyleSheet("font-size: 24px; font-weight: bold;")
         fila_cabecera.addWidget(titulo)
         fila_cabecera.addStretch()
 
@@ -230,7 +230,7 @@ class Inicio(QWidget):
         fila_cabecera.addWidget(self.etiqueta_estado)
 
         self.check_ia = QCheckBox("🤖 Redactar con IA")
-        self.check_ia.setStyleSheet("font-size: 12.5px; font-weight: 600; color: #0F766E;")
+        self.check_ia.setStyleSheet("font-size: 12.5px; font-weight: 600;")
         self.check_ia.toggled.connect(self._actualizar_indicador_estado)
         fila_cabecera.addWidget(self.check_ia)
 
@@ -245,18 +245,18 @@ class Inicio(QWidget):
 
         subtitulo = QLabel(
             "Pregunta con tus palabras cómo se hace cualquier proceso del cine. "
-            "El asistente busca en tus procedimientos confirmados y extrae el apartado "
-            "correspondiente de los manuales y correos guardados en 📚 Conocimiento."
+            "El asistente genera una guía paso a paso basándose únicamente en tus "
+            "manuales y correos guardados en 📚 Conocimiento."
         )
         subtitulo.setWordWrap(True)
-        subtitulo.setStyleSheet("color: #475569; font-size: 12.5px;")
+        subtitulo.setStyleSheet("font-size: 12.5px;")
         layout.addWidget(subtitulo)
 
         # ----- Botones rápidos de consultas habituales -----
         fila_rapidas = QHBoxLayout()
         fila_rapidas.setSpacing(6)
         etiqueta_rapidas = QLabel("Consultas rápidas:")
-        etiqueta_rapidas.setStyleSheet("color: #64748B; font-size: 11.5px; font-weight: 600;")
+        etiqueta_rapidas.setStyleSheet("font-size: 11.5px; font-weight: 600;")
         fila_rapidas.addWidget(etiqueta_rapidas)
 
         for texto_btn, consulta_btn in CONSULTAS_RAPIDAS:
