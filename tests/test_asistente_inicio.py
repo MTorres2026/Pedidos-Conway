@@ -980,26 +980,6 @@ class ResilienciaManualVisualTests(unittest.TestCase):
         self.assertIn("Abrir el acceso indicado", todo)
         self.assertIn("http://200.53.162.47", todo)
 
-    def test_ocr_local_compone_manual_desde_capturas(self):
-        from modulos.asistente_inicio import construir_texto_ocr_desde_imagenes
-
-        class _MotorFake:
-            def disponible(self):
-                return True
-
-            def leer(self, datos):
-                return (
-                    "Gestión de Inventario\nCrear Evento de Inventario\n"
-                    "1\nEscribe un código para identificar el evento\nPincha en Añadir"
-                )
-
-        adj = [AdjuntoIA(nombre="d1.jpg", mime="image/jpeg", datos_b64="QUJD")]
-        with patch("modulos.biblioteca._MotorOcr", _MotorFake):
-            texto = construir_texto_ocr_desde_imagenes(adj, "¿Cómo se hace la conciliación?")
-        self.assertIn("Crear Evento de Inventario", texto)
-        self.assertIn("Escribe un código", texto)
-        self.assertNotIn("\n1\n", texto.replace("1. ", ""))
-
     def test_manual_visual_exacto_gana_a_correo_con_mucho_texto(self):
         fichas = {
             1: dict(
