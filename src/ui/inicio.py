@@ -41,8 +41,10 @@ from modulos.asistente_inicio import (
     construir_contexto_rag,
     consultar_base_local,
     detectar_proveedor_ia,
+    exportar_manual_ia_docx,
     exportar_manual_ia_excel,
     exportar_manual_ia_word,
+    generar_todas_las_hojas_word,
     guardar_cache_manual_ia,
     leer_cache_manual_ia,
     normalizar,
@@ -257,6 +259,20 @@ class Inicio(QWidget):
         self.check_ia.toggled.connect(self._actualizar_indicador_estado)
         fila_cabecera.addWidget(self.check_ia)
 
+        self.boton_hojas_word = QPushButton("📘 Crear hojas Word de mis manuales")
+        self.boton_hojas_word.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.boton_hojas_word.setStyleSheet(
+            "QPushButton { background-color: #1D4ED8; color: #FFFFFF; font-weight: bold; "
+            "padding: 4px 10px; font-size: 12px; border-radius: 6px; } "
+            "QPushButton:hover { background-color: #2563EB; }"
+        )
+        self.boton_hojas_word.setToolTip(
+            "Convierte todos los manuales de tu biblioteca en Hojas Word (.docx) "
+            "formateadas paso a paso, en data/manuales_ia/hojas_word/."
+        )
+        self.boton_hojas_word.clicked.connect(self.crear_todas_las_hojas_word)
+        fila_cabecera.addWidget(self.boton_hojas_word)
+
         self.boton_limpiar = QPushButton("🧹 Limpiar chat")
         self.boton_limpiar.setStyleSheet(
             "QPushButton { padding: 4px 10px; font-size: 12px; }"
@@ -269,7 +285,8 @@ class Inicio(QWidget):
         subtitulo = QLabel(
             "Háblame como a una persona: di «hola», pregunta «¿qué documentos tienes?» "
             "o pide cómo se hace cualquier proceso del cine. Solo conozco tus manuales "
-            "y correos de 📚 Conocimiento: con ellos converso y te preparo la guía paso a paso."
+            "de 📚 Conocimiento: con ellos te muestro al instante la Hoja de Manual "
+            "formateada paso a paso, lista para abrir en Word o Excel."
         )
         subtitulo.setWordWrap(True)
         subtitulo.setStyleSheet("font-size: 12.5px;")
@@ -413,6 +430,49 @@ class Inicio(QWidget):
     def hacer_pregunta(self, texto_consulta: str):
         self.pregunta.setText(texto_consulta)
         self.buscar()
+
+    def crear_todas_las_hojas_word(self):
+        """Convierte todos los manuales de la biblioteca en Hojas Word (.docx)."""
+        biblioteca = self._obtener_biblioteca()
+        if biblioteca is None or self._contar_documentos() == 0:
+            QMessageBox.information(
+                self, "Hojas Word de manuales",
+                "Todavía no hay documentos en 📚 Conocimiento. Añade primero tus "
+                "manuales y después podré convertirlos en Hojas Word paso a paso.",
+            )
+            return
+        try:
+            resultado = generar_todas_las_hojas_word(biblioteca)
+        except Exception as err:
+            QMessageBox.warning(
+                self, "Hojas Word de manuales",
+                f"No se pudieron crear las Hojas Word:\n{err}",
+            )
+            return
+        if not resultado.generadas:
+            QMessageBox.information(
+                self, "Hojas Word de manuales",
+                "No he encontrado todavía manuales con pasos suficientes para "
+                "convertir. Cuando un manual tenga instrucciones paso a paso, "
+                "aquí crearé su Hoja Word automáticamente.",
+            )
+            return
+        titulos = "\n".join(
+            f"• {g.titulo} ({g.n_pasos} pasos)"
+            for g in resultado.generadas[:12]
+        )
+        extra = (
+            f"\n… y {len(resultado.generadas) - 12} más."
+            if len(resultado.generadas) > 12 else ""
+        )
+        QMessageBox.information(
+            self, "📘 Hojas Word creadas",
+            f"¡Listo! He creado {len(resultado.generadas)} Hoja(s) Word (.docx) "
+            f"formateadas paso a paso:\n\n{titulos}{extra}\n\n"
+            f"Están en:\n{resultado.carpeta}\n\n"
+            "Ábrelas con Word para leerlas, imprimirlas o compartirlas con tus compañeros.",
+        )
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(resultado.carpeta.resolve())))
 
     def limpiar_chat(self):
         self._turnos.clear()
@@ -646,7 +706,9 @@ class Inicio(QWidget):
 
     def _exportar_y_abrir_hoja(self, turno_id: int, formato: str):
         turno_sel = next((t for t in self._turnos if t.turno_id == turno_id), None)
-        if turno_sel is None or not turno_sel.respuesta.texto_ia:
+        if turno_sel is None or not (
+            turno_sel.respuesta.texto_ia or turno_sel.respuesta.tiene_contenido
+        ):
             QMessageBox.warning(self, "Exportar manual", "No se encontró el manual generado para exportar.")
             return
         try:
@@ -656,8 +718,8 @@ class Inicio(QWidget):
                 destino = carpeta / f"Manual_{slug}.xlsx"
                 exportar_manual_ia_excel(turno_sel.respuesta, destino)
             else:
-                destino = carpeta / f"Manual_{slug}.doc"
-                exportar_manual_ia_word(turno_sel.respuesta, destino)
+                destino = carpeta / f"Manual_{slug}.docx"
+                exportar_manual_ia_docx(turno_sel.respuesta, destino)
 
             if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(destino.resolve()))):
                 QMessageBox.information(

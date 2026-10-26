@@ -2793,6 +2793,209 @@ class ManualEstructuradoIA:
     bloques_libres: List[str] = field(default_factory=list)
 
 
+# ======================================================================
+# 6B) Hoja de Manual construida LOCALMENTE (sin IA): el mismo formato
+# bonito Word/Excel, generado al instante desde el documento original.
+# Así, preguntes lo que preguntes, siempre aparece la hoja formateada.
+# ======================================================================
+
+def _titulo_bonito_manual(titulo: str) -> str:
+    s = str(titulo or "").strip()
+    s = re.sub(r"\.(pptx|pdf|docx|xlsx|txt|md|eml|html?)$", "", s, flags=re.IGNORECASE)
+    s = re.sub(r"^[a-f0-9]{8,}[_\-\s]+", "", s, flags=re.IGNORECASE)
+    s = re.sub(r"^\d{6,8}[_\-\s]+", "", s)
+    s = re.sub(r"[_\-]+", " ", s)
+    s = re.sub(r"\s+", " ", s).strip(" .")
+    return s or "Manual operativo paso a paso"
+
+
+def _detectar_sistema_manual(texto: str) -> str:
+    norm = normalizar(texto or "")
+    sistemas: List[str] = []
+    for nombre, claves in (
+        ("ERP Global (PeopleSoft)", ("peoplesoft", "erp global", "erp")),
+        ("Cinema Manager", ("cinema manager",)),
+        ("Vista Cloud", ("vista cloud", "vista")),
+        ("Conway", ("conway",)),
+        ("TMS", ("tms",)),
+    ):
+        if any(c in norm for c in claves) and nombre not in sistemas:
+            sistemas.append(nombre)
+    return " · ".join(sistemas[:3])
+
+
+def _separar_pantalla_accion(texto: str) -> Tuple[str, str]:
+    m = re.match(r"^([^:\[\]]{3,48}):\s+(.+)$", texto or "")
+    if m and len(m.group(2).strip()) >= 8:
+        candidata = normalizar(m.group(1))
+        if any(k in candidata for k in (
+            "pantalla", "menu", "modulo", "erp", "cinema", "vista", "acceso",
+            "ruta", "pestana", "campo", "conway", "inicio", "paso",
+        )):
+            return (_limpiar_marcas_texto_plano(m.group(1)), m.group(2).strip())
+    return ("", (texto or "").strip())
+
+
+def construir_manual_desde_respuesta(respuesta: RespuestaAsistente) -> ManualEstructuradoIA:
+    """
+    Manual estructurado listo para pintar/exportar:
+      - si la IA ya redactó el manual, se parsea su texto;
+      - si no, se construye LOCALMENTE desde el procedimiento confirmado
+        y/o los apartados exactos del documento de la biblioteca.
+    """
+    if (respuesta.texto_ia or "").strip():
+        return parsear_manual_estructurado_ia(
+            respuesta.texto_ia,
+            titulo_respaldo=f"Manual paso a paso: {respuesta.pregunta.strip()}",
+        )
+
+    manual = ManualEstructuradoIA(titulo="", sistema="", objetivo="")
+    textos_fuente: List[str] = []
+
+    if respuesta.procedimiento is not None:
+        p = respuesta.procedimiento
+        manual.titulo = p.titulo
+        manual.sistema = p.sistema or ""
+        manual.objetivo = p.objetivo or ""
+        if p.pasos:
+            manual.fases.append(FaseHojaManual(
+                titulo="Procedimiento paso a paso",
+                pasos=[
+                    PasoHojaManual(
+                        numero=i,
+                        pantalla=_separar_pantalla_accion(paso)[0],
+                        accion=_separar_pantalla_accion(paso)[1],
+                    )
+                    for i, paso in enumerate(p.pasos, 1)
+                ],
+            ))
+        manual.comprobaciones.extend(p.comprobaciones)
+        manual.notas_importantes.extend(p.advertencias)
+        textos_fuente.append(f"{p.titulo} {p.objetivo} {' '.join(p.pasos)}")
+
+    for pasaje in (respuesta.pasajes or [])[:14]:
+        if pasaje.sin_texto_ocr:
+            continue
+        texto_sec = (pasaje.texto_seccion or "").strip()
+        if not texto_sec:
+            continue
+        textos_fuente.append(f"{pasaje.titulo_documento} {pasaje.titulo_seccion} {texto_sec[:1200]}")
+        if not manual.titulo:
+            manual.titulo = _titulo_bonito_manual(pasaje.titulo_documento)
+        titulo_fase = (pasaje.titulo_seccion or "").strip()
+        if not titulo_fase or normalizar(titulo_fase) == normalizar(pasaje.titulo_documento):
+            titulo_fase = "Procedimiento paso a paso"
+        fase = FaseHojaManual(titulo=titulo_fase)
+        es_fase_comprobacion = any(
+            k in normalizar(titulo_fase) for k in ("comprobacion", "verificacion")
+        )
+        vistos_fase: Set[str] = set()
+
+        for cruda in texto_sec.splitlines():
+            s = _limpiar_marcas_texto_plano(cruda)
+            s = re.sub(r"^[▪▸◆●◦]\s*", "", s).strip()
+            if not s or s.startswith("---"):
+                continue
+            if normalizar(s) in (normalizar(titulo_fase), normalizar(pasaje.titulo_documento)):
+                continue
+            norm_s = normalizar(s)
+            if re.match(r"^(nota|importante|atencion|ojo|aviso|cuidado)\b", norm_s):
+                limpia_nota = re.sub(
+                    r"^(nota|importante|atención|atencion|ojo|aviso|cuidado)\s*[:\-–—]?\s*",
+                    "", s, flags=re.IGNORECASE,
+                ).strip()
+                if limpia_nota and limpia_nota not in manual.notas_importantes:
+                    manual.notas_importantes.append(limpia_nota)
+                continue
+
+            m_num = re.match(r"^(\d{1,3})[.)\-]\s+(.+)$", s)
+            m_bullet = re.match(r"^[-•*]\s+(.+)$", s)
+            if es_fase_comprobacion:
+                item = (m_num.group(2) if m_num else (m_bullet.group(1) if m_bullet else s)).strip()
+                if item and item not in manual.comprobaciones:
+                    manual.comprobaciones.append(item)
+                continue
+            if m_num:
+                contenido = m_num.group(2).strip()
+            elif m_bullet:
+                contenido = m_bullet.group(1).strip()
+                if fase.pasos:
+                    clave_sub = normalizar(contenido)
+                    if clave_sub not in vistos_fase:
+                        vistos_fase.add(clave_sub)
+                        fase.pasos[-1].subpuntos.append(contenido)
+                    continue
+            else:
+                contenido = s
+                if fase.pasos and (contenido[:1].islower() or len(contenido) < 110):
+                    clave_sub = normalizar(contenido)
+                    if clave_sub not in vistos_fase:
+                        vistos_fase.add(clave_sub)
+                        fase.pasos[-1].subpuntos.append(contenido)
+                    continue
+            clave = normalizar(contenido)
+            if not clave or clave in vistos_fase:
+                continue
+            vistos_fase.add(clave)
+            pantalla_p, accion_p = _separar_pantalla_accion(contenido)
+            fase.pasos.append(PasoHojaManual(
+                numero=len(fase.pasos) + 1, pantalla=pantalla_p, accion=accion_p,
+            ))
+
+        if fase.pasos:
+            manual.fases.append(fase)
+
+    # Renumeración global continua (PASO 1, 2, 3… aunque haya varias fases)
+    contador = 0
+    for fase in manual.fases:
+        for paso in fase.pasos:
+            contador += 1
+            paso.numero = contador
+
+    if not manual.titulo:
+        manual.titulo = f"Manual paso a paso: {respuesta.pregunta.strip()}" \
+            if respuesta.pregunta else "Manual operativo paso a paso"
+    if not manual.sistema:
+        manual.sistema = _detectar_sistema_manual(" ".join(textos_fuente))
+    if not manual.objetivo:
+        manual.objetivo = (
+            f"Realizar correctamente el proceso «{_titulo_bonito_manual(manual.titulo)}» "
+            "siguiendo exactamente los pasos del documento guardado en la biblioteca."
+        )
+    return manual
+
+
+def _texto_estructurado_desde_manual(manual: ManualEstructuradoIA) -> str:
+    """Serializa el manual al formato que pinta la Hoja (tabla 4 columnas)."""
+    lineas = [f"# {manual.titulo}"]
+    if manual.sistema:
+        lineas.append(f"SISTEMA: {manual.sistema}")
+    if manual.objetivo:
+        lineas.append(f"OBJETIVO: {manual.objetivo}")
+    for bloque in manual.bloques_libres:
+        lineas.append(bloque.replace("|", "/"))
+    for fase in manual.fases:
+        lineas.append("")
+        lineas.append(f"## FASE: {fase.titulo or 'Procedimiento paso a paso'}")
+        for paso in fase.pasos:
+            accion = paso.accion.replace("|", "/")
+            if paso.subpuntos:
+                accion += " ↳ " + " ↳ ".join(sp.replace("|", "/") for sp in paso.subpuntos)
+            lineas.append(
+                f"PASO {paso.numero} | {paso.pantalla.replace('|', '/') or 'En pantalla'} "
+                f"| {accion} | {paso.nota.replace('|', '/')}"
+            )
+    if manual.notas_importantes:
+        lineas.append("")
+        lineas.append("## ⚠️ NOTAS IMPORTANTES")
+        lineas.extend(f"- {n.replace('|', '/')}" for n in manual.notas_importantes)
+    if manual.comprobaciones:
+        lineas.append("")
+        lineas.append("## ✅ COMPROBACIÓN FINAL")
+        lineas.extend(f"- {c.replace('|', '/')}" for c in manual.comprobaciones)
+    return "\n".join(lineas)
+
+
 def _decorar_linea_rica_ia(texto_crudo: str) -> str:
     """
     Escapa HTML de forma segura y embellece:
@@ -3037,7 +3240,7 @@ def formatear_markdown_ia_html(
             "&nbsp;&nbsp;"
             f'<a href="word:{turno_id}" '
             'style="background-color:#1D4ED8; color:#FFFFFF; font-weight:bold; '
-            'text-decoration:none; font-size:11.5px;">&nbsp;📘 Abrir en Word (.doc)&nbsp;</a>'
+            'text-decoration:none; font-size:11.5px;">&nbsp;📘 Abrir en Word (.docx)&nbsp;</a>'
             "</div>"
         )
 
@@ -3262,10 +3465,7 @@ def exportar_manual_ia_excel(respuesta: RespuestaAsistente, ruta_destino: Path) 
     """
     ruta_destino = Path(ruta_destino)
     ruta_destino.parent.mkdir(parents=True, exist_ok=True)
-    manual = parsear_manual_estructurado_ia(
-        respuesta.texto_ia,
-        titulo_respaldo=f"Manual: {respuesta.pregunta}",
-    )
+    manual = construir_manual_desde_respuesta(respuesta)
 
     try:
         from openpyxl import Workbook  # type: ignore
@@ -3475,10 +3675,13 @@ def exportar_manual_ia_word(respuesta: RespuestaAsistente, ruta_destino: Path) -
     """
     ruta_destino = Path(ruta_destino)
     ruta_destino.parent.mkdir(parents=True, exist_ok=True)
+    texto_hoja = (respuesta.texto_ia or "").strip() or _texto_estructurado_desde_manual(
+        construir_manual_desde_respuesta(respuesta)
+    )
     cuerpo = formatear_markdown_ia_html(
-        respuesta.texto_ia,
+        texto_hoja,
         titulo_respaldo=f"Manual: {respuesta.pregunta}",
-        proveedor_ia=respuesta.proveedor_ia or "IA",
+        proveedor_ia=respuesta.proveedor_ia or "CineStock",
         turno_id=0,
     )
     doc_html = (
@@ -3496,6 +3699,393 @@ def exportar_manual_ia_word(respuesta: RespuestaAsistente, ruta_destino: Path) -
     )
     ruta_destino.write_bytes(doc_html.encode("utf-8-sig"))
     return ruta_destino
+
+
+# ======================================================================
+# 6C) Documento Word REAL (.docx): portada, tabla de pasos coloreada,
+# notas y comprobaciones. Sin librerías externas (OOXML nativo), para
+# que funcione igual en el WinPython del cine.
+# ======================================================================
+
+_W_NS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+
+
+def _docx_run(texto: str, *, bold: bool = False, size: int = 21,
+              color: str = "0F172A", italic: bool = False) -> str:
+    props = (
+        "<w:rPr><w:rFonts w:ascii=\"Segoe UI\" w:hAnsi=\"Segoe UI\"/>"
+        + ("<w:b/>" if bold else "")
+        + ("<w:i/>" if italic else "")
+        + f"<w:color w:val=\"{color}\"/><w:sz w:val=\"{size}\"/><w:szCs w:val=\"{size}\"/></w:rPr>"
+    )
+    return f"<w:r>{props}<w:t xml:space=\"preserve\">{html.escape(str(texto or ''))}</w:t></w:r>"
+
+
+def _docx_para(contenido: str, *, align: str = "", shade: str = "",
+               before: int = 0, after: int = 90, borde_izq: str = "") -> str:
+    ppr = "<w:pPr>"
+    if borde_izq:
+        ppr += (f"<w:pBdr><w:left w:val=\"single\" w:sz=\"18\" w:space=\"8\" "
+                f"w:color=\"{borde_izq}\"/></w:pBdr>")
+    if shade:
+        ppr += f"<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"{shade}\"/>"
+    ppr += f"<w:spacing w:before=\"{before}\" w:after=\"{after}\" w:line=\"264\" w:lineRule=\"auto\"/>"
+    if align:
+        ppr += f"<w:jc w:val=\"{align}\"/>"
+    ppr += "</w:pPr>"
+    return f"<w:p>{ppr}{contenido}</w:p>"
+
+
+def _docx_celda(parrafos: List[str], *, shade: str = "", ancho: int = 2400) -> str:
+    tcpr = (
+        f"<w:tcPr><w:tcW w:w=\"{ancho}\" w:type=\"dxa\"/>"
+        + (f"<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"{shade}\"/>" if shade else "")
+        + "<w:tcMar><w:top w:w=\"55\" w:type=\"dxa\"/><w:left w:w=\"90\" w:type=\"dxa\"/>"
+        "<w:bottom w:w=\"55\" w:type=\"dxa\"/><w:right w:w=\"90\" w:type=\"dxa\"/></w:tcMar>"
+        "<w:vAlign w:val=\"top\"/></w:tcPr>"
+    )
+    return f"<w:tc>{tcpr}{''.join(parrafos)}</w:tc>"
+
+
+def _docx_tabla(filas: List[List[str]], anchos: List[int], *, bordes: str = "B6C2D9") -> str:
+    grid = "".join(f"<w:gridCol w:w=\"{a}\"/>" for a in anchos)
+    filas_xml = "".join(f"<w:tr>{''.join(fila)}</w:tr>" for fila in filas)
+    return (
+        "<w:tbl><w:tblPr><w:tblW w:w=\"9350\" w:type=\"dxa\"/>"
+        f"<w:tblBorders>"
+        f"<w:top w:val=\"single\" w:sz=\"6\" w:color=\"{bordes}\"/>"
+        f"<w:left w:val=\"single\" w:sz=\"6\" w:color=\"{bordes}\"/>"
+        f"<w:bottom w:val=\"single\" w:sz=\"6\" w:color=\"{bordes}\"/>"
+        f"<w:right w:val=\"single\" w:sz=\"6\" w:color=\"{bordes}\"/>"
+        f"<w:insideH w:val=\"single\" w:sz=\"4\" w:color=\"{bordes}\"/>"
+        f"<w:insideV w:val=\"single\" w:sz=\"4\" w:color=\"{bordes}\"/>"
+        "</w:tblBorders></w:tblPr>"
+        f"<w:tblGrid>{grid}</w:tblGrid>{filas_xml}</w:tbl>"
+    )
+
+
+def exportar_manual_ia_docx(respuesta: RespuestaAsistente, ruta_destino: Path) -> Path:
+    """
+    Genera un documento Word .docx AUTÉNTICO y formateado por CineStock:
+    portada corporativa, sistema/objetivo, fases, tabla de pasos en colores
+    (PASO | Pantalla/Menú | Qué hacer | Valor/Nota), notas importantes,
+    comprobación final y pie con la fuente de la biblioteca.
+    """
+    ruta_destino = Path(ruta_destino)
+    if ruta_destino.suffix.lower() != ".docx":
+        ruta_destino = ruta_destino.with_suffix(".docx")
+    ruta_destino.parent.mkdir(parents=True, exist_ok=True)
+    manual = construir_manual_desde_respuesta(respuesta)
+    fecha_hoy = date.today().strftime("%d/%m/%Y")
+
+    fuentes: List[str] = []
+    for p in (respuesta.pasajes or []):
+        if p.titulo_documento and p.titulo_documento not in fuentes:
+            fuentes.append(p.titulo_documento)
+    if respuesta.procedimiento is not None and respuesta.procedimiento.titulo not in fuentes:
+        fuentes.append(respuesta.procedimiento.titulo)
+    texto_fuentes = " · ".join(fuentes) if fuentes else "Biblioteca de 📚 Conocimiento"
+
+    cuerpo: List[str] = []
+    # Portada
+    cuerpo.append(_docx_tabla([[
+        _docx_celda([
+            _docx_para(_docx_run("CINESTOCK  ·  HOJA DE MANUAL OPERATIVO", bold=True, size=17, color="BFDBFE"), after=60),
+            _docx_para(_docx_run(f"📋 {manual.titulo}", bold=True, size=34, color="FFFFFF"), after=60),
+            _docx_para(_docx_run("Manual paso a paso generado desde tu biblioteca de Conocimiento", size=20, color="DBEAFE", italic=True), after=20),
+        ], shade="1E3A8A", ancho=9350),
+    ]], [9350], bordes="1E3A8A"))
+    cuerpo.append(_docx_para("", after=70))
+    # Metadatos
+    filas_meta: List[List[str]] = []
+    if manual.sistema:
+        filas_meta.append([
+            _docx_celda([_docx_para(_docx_run("💻 Sistema", bold=True, size=20, color="1E3A8A"), after=20)], shade="EFF6FF", ancho=2100),
+            _docx_celda([_docx_para(_docx_run(manual.sistema, size=21), after=20)], ancho=7250),
+        ])
+    filas_meta.append([
+        _docx_celda([_docx_para(_docx_run("🎯 Objetivo", bold=True, size=20, color="1E3A8A"), after=20)], shade="EFF6FF", ancho=2100),
+        _docx_celda([_docx_para(_docx_run(manual.objetivo, size=21), after=20)], ancho=7250),
+    ])
+    filas_meta.append([
+        _docx_celda([_docx_para(_docx_run("📎 Fuente", bold=True, size=20, color="1E3A8A"), after=20)], shade="EFF6FF", ancho=2100),
+        _docx_celda([_docx_para(_docx_run(texto_fuentes, size=19, color="475569"), after=20)], ancho=7250),
+    ])
+    filas_meta.append([
+        _docx_celda([_docx_para(_docx_run("🗓 Hoja creada", bold=True, size=20, color="1E3A8A"), after=20)], shade="EFF6FF", ancho=2100),
+        _docx_celda([_docx_para(_docx_run(f"{fecha_hoy} · CineStock (solo con documentos de tu biblioteca)", size=19, color="475569"), after=20)], ancho=7250),
+    ])
+    cuerpo.append(_docx_tabla(filas_meta, [2100, 7250]))
+    cuerpo.append(_docx_para("", after=70))
+    cuerpo.append(_docx_para(
+        _docx_run("▶ Cómo usar esta hoja:  ", bold=True, size=21, color="0369A1")
+        + _docx_run("sigue los pasos en orden, sin saltarte ninguno. En cada paso tienes la pantalla o menú, "
+                    "exactamente qué pulsar o escribir y, a la derecha, el valor o aviso clave.", size=21, color="0C4A6E"),
+        shade="F0F9FF", borde_izq="0284C7", after=160,
+    ))
+
+    for bloque in manual.bloques_libres:
+        cuerpo.append(_docx_para(_docx_run(bloque, size=21), after=90))
+
+    anchos = [1050, 2050, 4300, 1950]
+    for fase in manual.fases:
+        cuerpo.append(_docx_para(
+            _docx_run(f"📂  {fase.titulo or 'Procedimiento paso a paso'}", bold=True, size=25, color="1E3A8A"),
+            shade="DBEAFE", before=170, after=110,
+        ))
+        filas: List[List[str]] = [[
+            _docx_celda([_docx_para(_docx_run("ORDEN", bold=True, size=18, color="FFFFFF"), align="center", after=20)], shade="1E293B", ancho=anchos[0]),
+            _docx_celda([_docx_para(_docx_run("PANTALLA / MENÚ", bold=True, size=18, color="FFFFFF"), after=20)], shade="1E293B", ancho=anchos[1]),
+            _docx_celda([_docx_para(_docx_run("PASO A PASO — QUÉ PULSAR Y QUÉ ESCRIBIR", bold=True, size=18, color="FFFFFF"), after=20)], shade="1E293B", ancho=anchos[2]),
+            _docx_celda([_docx_para(_docx_run("VALOR / NOTA CLAVE", bold=True, size=18, color="FFFFFF"), after=20)], shade="1E293B", ancho=anchos[3]),
+        ]]
+        for i, paso in enumerate(fase.pasos):
+            fondo = "FFFFFF" if i % 2 == 0 else "F1F5F9"
+            paras_accion = [_docx_para(_docx_run(_limpiar_marcas_texto_plano(paso.accion), size=21), after=45)]
+            for sub in paso.subpuntos:
+                paras_accion.append(_docx_para(
+                    _docx_run("↳ ", bold=True, size=20, color="2563EB")
+                    + _docx_run(_limpiar_marcas_texto_plano(sub), size=20, color="334155"),
+                    after=35,
+                ))
+            nota_txt = _limpiar_marcas_texto_plano(paso.nota)
+            es_aviso_nota = any(k in normalizar(nota_txt) for k in ("importante", "ojo", "atencion", "cuidado")) or "⚠" in nota_txt
+            filas.append([
+                _docx_celda([_docx_para(_docx_run(f"PASO {paso.numero}", bold=True, size=19, color="FFFFFF"), align="center", after=20)], shade="2563EB", ancho=anchos[0]),
+                _docx_celda([_docx_para(_docx_run(_limpiar_marcas_texto_plano(paso.pantalla) or f"Paso {paso.numero}", bold=True, size=20, color="1D4ED8"), after=20)], shade=fondo, ancho=anchos[1]),
+                _docx_celda(paras_accion, shade=fondo, ancho=anchos[2]),
+                _docx_celda([_docx_para(_docx_run(nota_txt or "—", size=19, color="92400E" if es_aviso_nota else "475569"), after=20)], shade="FFFBEB" if (nota_txt and es_aviso_nota) else fondo, ancho=anchos[3]),
+            ])
+        cuerpo.append(_docx_tabla(filas, anchos))
+        cuerpo.append(_docx_para("", after=80))
+
+    if manual.notas_importantes:
+        cuerpo.append(_docx_para(
+            _docx_run("⚠️  MUY IMPORTANTE A TENER EN CUENTA", bold=True, size=24, color="B45309"),
+            shade="FFFBEB", before=150, after=90, borde_izq="F59E0B",
+        ))
+        for nota in manual.notas_importantes:
+            cuerpo.append(_docx_para(
+                _docx_run("🔸 ", bold=True, size=21, color="D97706")
+                + _docx_run(_limpiar_marcas_texto_plano(nota), size=21, color="78350F"),
+                after=60,
+            ))
+
+    if manual.comprobaciones:
+        cuerpo.append(_docx_para(
+            _docx_run("✅  COMPROBACIÓN FINAL", bold=True, size=24, color="047857"),
+            shade="ECFDF5", before=150, after=90, borde_izq="10B981",
+        ))
+        for comp in comprobaciones_limpias(manual.comprobaciones):
+            cuerpo.append(_docx_para(
+                _docx_run("✔ ", bold=True, size=21, color="059669")
+                + _docx_run(_limpiar_marcas_texto_plano(comp), size=21, color="065F46"),
+                after=60,
+            ))
+
+    cuerpo.append(_docx_para(
+        _docx_run("Hoja de manual generada por CineStock a partir de los documentos de tu biblioteca de "
+                  "📚 Conocimiento. Consulta siempre el archivo original si necesitas ver las capturas.", size=17, color="64748B", italic=True),
+        before=220, after=40,
+    ))
+
+    document_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        f"<w:document {_W_NS} "
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+        "<w:body>" + "".join(cuerpo) +
+        "<w:sectPr><w:headerReference w:type=\"default\" r:id=\"rId3\"/>"
+        "<w:footerReference w:type=\"default\" r:id=\"rId4\"/>"
+        "<w:pgSz w:w=\"11906\" w:h=\"16838\"/>"
+        "<w:pgMar w:top=\"850\" w:right=\"850\" w:bottom=\"850\" w:left=\"850\" "
+        "w:header=\"450\" w:footer=\"450\"/></w:sectPr></w:body></w:document>"
+    )
+    styles_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        f"<w:styles {_W_NS}>"
+        "<w:docDefaults><w:rPrDefault><w:rPr>"
+        "<w:rFonts w:ascii=\"Segoe UI\" w:hAnsi=\"Segoe UI\"/>"
+        "<w:sz w:val=\"21\"/><w:szCs w:val=\"21\"/></w:rPr></w:rPrDefault></w:docDefaults>"
+        "<w:style w:type=\"paragraph\" w:default=\"1\" w:styleId=\"Normal\">"
+        "<w:name w:val=\"Normal\"/></w:style></w:styles>"
+    )
+    header_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        f"<w:hdr {_W_NS}>" +
+        _docx_para(_docx_run("CineStock · Hoja de Manual Operativo", bold=True, size=16, color="64748B"), align="right", after=30) +
+        "</w:hdr>"
+    )
+    footer_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        f"<w:ftr {_W_NS}><w:p><w:pPr><w:jc w:val=\"center\"/></w:pPr>"
+        + _docx_run("CineStock · Manual paso a paso · Página ", size=16, color="64748B")
+        + "<w:r><w:rPr><w:rFonts w:ascii=\"Segoe UI\" w:hAnsi=\"Segoe UI\"/>"
+          "<w:color w:val=\"64748B\"/><w:sz w:val=\"16\"/></w:rPr>"
+          "<w:fldChar w:fldCharType=\"begin\"/></w:r>"
+          "<w:r><w:instrText xml:space=\"preserve\"> PAGE </w:instrText></w:r>"
+          "<w:r><w:fldChar w:fldCharType=\"end\"/></w:r>"
+        + "</w:p></w:ftr>"
+    )
+    content_types = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+        '<Default Extension="xml" ContentType="application/xml"/>'
+        '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
+        '<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>'
+        '<Override PartName="/word/header1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/>'
+        '<Override PartName="/word/footer1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/>'
+        '<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>'
+        "</Types>"
+    )
+    rels_root = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>'
+        '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>'
+        "</Relationships>"
+    )
+    rels_doc = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
+        '<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/>'
+        '<Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer1.xml"/>'
+        "</Relationships>"
+    )
+    core_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" '
+        'xmlns:dc="http://purl.org/dc/elements/1.1/">'
+        f"<dc:title>{html.escape(manual.titulo)}</dc:title>"
+        "<dc:creator>CineStock</dc:creator>"
+        f"<dc:description>{html.escape('Hoja de manual operativo paso a paso generada desde la biblioteca de Conocimiento')}</dc:description>"
+        "</cp:coreProperties>"
+    )
+
+    with zipfile.ZipFile(ruta_destino, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("[Content_Types].xml", content_types)
+        zf.writestr("_rels/.rels", rels_root)
+        zf.writestr("word/document.xml", document_xml)
+        zf.writestr("word/styles.xml", styles_xml)
+        zf.writestr("word/header1.xml", header_xml)
+        zf.writestr("word/footer1.xml", footer_xml)
+        zf.writestr("word/_rels/document.xml.rels", rels_doc)
+        zf.writestr("docProps/core.xml", core_xml)
+    return ruta_destino
+
+
+@dataclass
+class HojaWordGenerada:
+    doc_id: int
+    titulo: str
+    ruta: Path
+    n_pasos: int
+
+
+@dataclass
+class ResultadoHojasWord:
+    carpeta: Path
+    generadas: List[HojaWordGenerada] = field(default_factory=list)
+    omitidas: int = 0
+    indice: Optional[Path] = None
+
+
+def generar_todas_las_hojas_word(
+    biblioteca,
+    carpeta_destino: Optional[Path] = None,
+) -> ResultadoHojasWord:
+    """
+    Convierte TODOS los manuales instructivos de la biblioteca en Hojas Word
+    (.docx) formateadas por CineStock, una por manual (sin duplicar temas),
+    en data/manuales_ia/hojas_word/ con un índice. No usa IA ni internet.
+    """
+    if carpeta_destino is None:
+        carpeta_base = getattr(biblioteca, "carpeta", None)
+        carpeta_destino = (
+            Path(carpeta_base).parent / "manuales_ia" / "hojas_word"
+            if carpeta_base else Path("data") / "manuales_ia" / "hojas_word"
+        )
+    carpeta_destino = Path(carpeta_destino)
+    carpeta_destino.mkdir(parents=True, exist_ok=True)
+
+    fichas = _obtener_todas_las_fichas(biblioteca) if biblioteca is not None else []
+    prioridad_tipo = {"pptx": 5, "pdf": 5, "docx": 4, "texto": 3, "xlsx": 2, "correo": 1}
+    candidatos: Dict[str, Tuple[Tuple[int, int, int], RespuestaAsistente, ManualEstructuradoIA]] = {}
+    omitidas = 0
+
+    for ficha in fichas:
+        texto = (ficha.get("texto") or "").strip()
+        tipo = (ficha.get("tipo") or "texto").strip()
+        titulo_doc = (ficha.get("titulo") or "").strip() or "Manual"
+        if len(texto) < 180 or not _es_contenido_instructivo(texto, tipo):
+            omitidas += 1
+            continue
+        secciones = dividir_documento_en_secciones(texto, titulo_doc)
+        pasajes = [
+            PasajeManual(
+                doc_id=int(ficha["id"]), titulo_documento=titulo_doc,
+                tipo_documento=tipo, fecha=ficha.get("fecha_doc") or "",
+                categoria=ficha.get("categoria") or "",
+                remitente=ficha.get("remitente") or "",
+                estado=ficha.get("estado") or "NORMAL",
+                titulo_seccion=tit, texto_seccion=txt, puntuacion=60.0,
+            )
+            for tit, txt in secciones[:15] if (txt or "").strip()
+        ]
+        if not pasajes:
+            omitidas += 1
+            continue
+        resp_tmp = RespuestaAsistente(
+            pregunta=_titulo_bonito_manual(titulo_doc), pasajes=pasajes,
+        )
+        manual_tmp = construir_manual_desde_respuesta(resp_tmp)
+        n_pasos = sum(len(f.pasos) for f in manual_tmp.fases)
+        if n_pasos < 2:
+            omitidas += 1
+            continue
+        clave_tema = re.sub(
+            r"\b(20\d{2}|19\d{2}|v\d+|version \d+)\b", "",
+            normalizar(_titulo_bonito_manual(titulo_doc)),
+        )
+        clave_tema = re.sub(r"\s+", " ", clave_tema).strip() or normalizar(titulo_doc)
+        rango = (n_pasos, prioridad_tipo.get(tipo, 1), len(texto))
+        if clave_tema not in candidatos or rango > candidatos[clave_tema][0]:
+            candidatos[clave_tema] = (rango, resp_tmp, manual_tmp)
+
+    generadas: List[HojaWordGenerada] = []
+    for _clave, (_rango, resp_tmp, manual_tmp) in sorted(
+        candidatos.items(), key=lambda kv: normalizar(kv[1][2].titulo)
+    ):
+        slug = "_".join(normalizar(manual_tmp.titulo).split())[:70] or "manual"
+        destino = carpeta_destino / f"Hoja_Manual_{slug}.docx"
+        exportar_manual_ia_docx(resp_tmp, destino)
+        generadas.append(HojaWordGenerada(
+            doc_id=resp_tmp.pasajes[0].doc_id if resp_tmp.pasajes else 0,
+            titulo=manual_tmp.titulo,
+            ruta=destino,
+            n_pasos=sum(len(f.pasos) for f in manual_tmp.fases),
+        ))
+
+    ruta_indice = carpeta_destino / "INDICE_Hojas_de_Manuales.txt"
+    lineas_indice = [
+        "CINESTOCK · ÍNDICE DE HOJAS DE MANUALES WORD",
+        f"Generadas el {date.today().strftime('%d/%m/%Y')} desde tu biblioteca de Conocimiento.",
+        f"Hojas creadas: {len(generadas)} · Documentos omitidos (no son manuales paso a paso): {omitidas}",
+        "",
+    ]
+    lineas_indice.extend(
+        f"{i}. {g.titulo}  ({g.n_pasos} pasos)  ->  {g.ruta.name}"
+        for i, g in enumerate(generadas, 1)
+    )
+    if not generadas:
+        lineas_indice.append("Todavía no hay manuales instructivos suficientes en la biblioteca.")
+    ruta_indice.write_text("\n".join(lineas_indice), encoding="utf-8")
+
+    return ResultadoHojasWord(
+        carpeta=carpeta_destino, generadas=generadas,
+        omitidas=omitidas, indice=ruta_indice,
+    )
 
 
 def _html_tarjeta_paso_local(num_paso: int, cuerpo_html: str) -> str:
@@ -3757,6 +4347,39 @@ def renderizar_respuesta_asistente_html(
                 "</td></tr></table>"
             )
         return "".join(bloques)
+
+    # Sin IA (o mientras llega): la Hoja de Manual formateada por CineStock
+    # se construye al instante desde el documento exacto de la biblioteca.
+    if respuesta.procedimiento is not None or respuesta.pasajes:
+        manual_local = construir_manual_desde_respuesta(respuesta)
+        if any(f.pasos for f in manual_local.fases):
+            bloques.append(formatear_markdown_ia_html(
+                _texto_estructurado_desde_manual(manual_local),
+                titulo_respaldo=f"Manual paso a paso: {respuesta.pregunta.strip()}",
+                proveedor_ia="CineStock · Hoja de Manual",
+                turno_id=turno_id,
+            ))
+            if respuesta.pasajes:
+                vistos_l: set = set()
+                enlaces_l: List[str] = []
+                for pasaje in respuesta.pasajes:
+                    if pasaje.doc_id in vistos_l:
+                        continue
+                    vistos_l.add(pasaje.doc_id)
+                    enlaces_l.append(
+                        f'<span style="color:#475569;">{html.escape(pasaje.titulo_documento)}</span> '
+                        f'(<a href="abrir:{pasaje.doc_id}" '
+                        f'style="color:#2563EB; text-decoration:none; font-weight:bold;">'
+                        f"ver archivo original</a>)"
+                    )
+                bloques.append(
+                    '<table width="100%" cellpadding="7" cellspacing="0" bgcolor="#F8FAFC" '
+                    'style="border:1px solid #E2E8F0; margin-top:2px;">'
+                    f'<tr><td style="font-family:{FUENTE_UI}; font-size:11.5px; color:#64748B;">'
+                    f'📎 Documento origen: {" · ".join(enlaces_l)}'
+                    "</td></tr></table>"
+                )
+            return "".join(bloques)
 
     if respuesta.procedimiento is not None:
         p = respuesta.procedimiento

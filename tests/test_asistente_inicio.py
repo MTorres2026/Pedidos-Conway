@@ -15,12 +15,15 @@ from modulos.asistente_inicio import (
     RespuestaAsistente,
     buscar_procedimiento_confirmado,
     construir_contexto_conversacional,
+    construir_manual_desde_respuesta,
     consultar_base_local,
     detectar_intencion_conversacional,
     detectar_proveedor_ia,
     dividir_documento_en_secciones,
+    exportar_manual_ia_docx,
     exportar_manual_ia_excel,
     exportar_manual_ia_word,
+    generar_todas_las_hojas_word,
     extraer_terminos_consulta,
     formatear_markdown_ia_html,
     guardar_cache_manual_ia,
@@ -346,6 +349,57 @@ class ChatConversacionalTests(AsistentePrecisionEstrictaTests):
                 system = payload["messages"][0]["content"]
                 self.assertIn("EXCLUSIVAMENTE", system)
                 self.assertIn("biblioteca", payload["messages"][1]["content"])
+
+
+class HojasWordManualesTests(AsistentePrecisionEstrictaTests):
+    """Hoja formateada al instante en el chat + Word .docx real para todos."""
+
+    def test_hoja_formateada_aparece_sin_ia_al_preguntar_por_conciliacion(self):
+        resp = consultar_base_local("¿Cómo se hace la conciliación de inventario?", self.bib)
+        self.assertEqual(resp.texto_ia, "")
+        manual = construir_manual_desde_respuesta(resp)
+        self.assertGreaterEqual(sum(len(f.pasos) for f in manual.fases), 3)
+
+        html_out = renderizar_respuesta_asistente_html(resp, turno_id=7)
+        self.assertIn("HOJA DE MANUAL OPERATIVO PASO A PASO", html_out)
+        self.assertIn("PASO 1", html_out)
+        self.assertIn("Conciliación de Stock", html_out)
+        self.assertIn('href="word:7"', html_out)
+        self.assertIn('href="excel:7"', html_out)
+        self.assertIn(f'href="abrir:{self.id_manual}"', html_out)
+
+    def test_word_docx_es_un_documento_word_real_y_formateado(self):
+        import xml.etree.ElementTree as ET
+
+        resp = consultar_base_local("¿Cómo se hace la conciliación de inventario?", self.bib)
+        ruta = exportar_manual_ia_docx(resp, self.raiz / "out" / "Manual_Conciliacion.docx")
+        self.assertTrue(ruta.is_file())
+        self.assertTrue(zipfile.is_zipfile(ruta))
+        with zipfile.ZipFile(ruta) as z:
+            nombres = set(z.namelist())
+            self.assertIn("word/document.xml", nombres)
+            self.assertIn("word/styles.xml", nombres)
+            self.assertIn("word/header1.xml", nombres)
+            self.assertIn("word/footer1.xml", nombres)
+            document_xml = z.read("word/document.xml").decode("utf-8")
+            ET.fromstring(document_xml)  # XML válido que Word puede abrir
+        self.assertIn("PASO 1", document_xml)
+        self.assertIn("Conciliaci", document_xml)
+        self.assertIn("Cinema Manager", document_xml)
+        self.assertIn("PANTALLA / MENÚ", document_xml)
+
+    def test_crear_todas_las_hojas_word_de_la_biblioteca(self):
+        carpeta = self.raiz / "hojas_word"
+        resultado = generar_todas_las_hojas_word(self.bib, carpeta)
+        self.assertGreaterEqual(len(resultado.generadas), 1)
+        self.assertTrue(resultado.indice and resultado.indice.is_file())
+        titulos = " ".join(g.titulo for g in resultado.generadas)
+        self.assertIn("Conciliacion", titulos.replace("ó", "o"))
+        for hoja in resultado.generadas:
+            self.assertTrue(hoja.ruta.is_file())
+            self.assertEqual(hoja.ruta.suffix, ".docx")
+            self.assertTrue(zipfile.is_zipfile(hoja.ruta))
+            self.assertGreaterEqual(hoja.n_pasos, 2)
 
 
 class AsistenteIATests(unittest.TestCase):
