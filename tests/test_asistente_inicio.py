@@ -14,7 +14,9 @@ from modulos.asistente_inicio import (
     MARCA_NO_DISPONIBLE,
     RespuestaAsistente,
     buscar_procedimiento_confirmado,
+    construir_contexto_conversacional,
     consultar_base_local,
+    detectar_intencion_conversacional,
     detectar_proveedor_ia,
     dividir_documento_en_secciones,
     exportar_manual_ia_excel,
@@ -25,6 +27,7 @@ from modulos.asistente_inicio import (
     leer_cache_manual_ia,
     renderizar_respuesta_asistente_html,
     sintetizar_con_ia,
+    sintetizar_respuesta_conversacional_ia,
 )
 from modulos.biblioteca import Biblioteca
 
@@ -261,6 +264,88 @@ generar el reporte “Estado de Inventario” y validar que se haya finalizado.
         self.assertIn(f'href="abrir:{alta.id}"', html_out)
         self.assertNotIn("<script>", html_out)
         self.assertIn("&lt;script&gt;", html_out)
+
+
+class ChatConversacionalTests(AsistentePrecisionEstrictaTests):
+    """Chat natural tipo IA, pero solo con el conocimiento de su biblioteca."""
+
+    def test_saludo_responde_como_persona_sin_buscar_manual(self):
+        self.assertEqual(detectar_intencion_conversacional("Hola"), ("saludo", ""))
+        resp = consultar_base_local("Hola", self.bib)
+        self.assertTrue(resp.es_chat)
+        self.assertEqual(resp.intencion_chat, "saludo")
+        self.assertIn("Hola", resp.texto_chat)
+        self.assertFalse(resp.pasajes)
+        html_out = renderizar_respuesta_asistente_html(resp)
+        self.assertIn("TU ASISTENTE DE CINESTOCK", html_out)
+        self.assertNotIn("PROCEDIMIENTO NO DISPONIBLE", html_out)
+
+    def test_que_documentos_tienes_lista_la_biblioteca_real(self):
+        resp = consultar_base_local("¿Qué documentos tienes?", self.bib)
+        self.assertEqual(resp.intencion_chat, "inventario")
+        self.assertTrue(resp.documentos_chat)
+        ids = [d.doc_id for d in resp.documentos_chat]
+        self.assertIn(self.id_manual, ids)
+        html_out = renderizar_respuesta_asistente_html(resp)
+        self.assertIn(f'href="abrir:{self.id_manual}"', html_out)
+        self.assertIn("Manual_Inventario_y_Conciliacion_2026", html_out)
+
+    def test_tienes_algo_sobre_un_tema_y_tema_inexistente(self):
+        resp = consultar_base_local("¿Tienes algo sobre mermas?", self.bib)
+        self.assertEqual(resp.intencion_chat, "tema")
+        self.assertTrue(resp.documentos_chat)
+        self.assertIn(self.id_manual, [d.doc_id for d in resp.documentos_chat])
+
+        resp_no = consultar_base_local("¿Tienes algo sobre cohetes espaciales?", self.bib)
+        self.assertEqual(resp_no.intencion_chat, "tema")
+        self.assertEqual(resp_no.documentos_chat, [])
+        self.assertIn("no tengo ningún documento", resp_no.texto_chat)
+
+    def test_identidad_conteo_y_categorias_solo_con_su_biblioteca(self):
+        resp_id = consultar_base_local("¿Quién eres y qué puedes hacer?", self.bib)
+        self.assertEqual(resp_id.intencion_chat, "identidad")
+        self.assertIn("CineStock", resp_id.texto_chat)
+
+        resp_n = consultar_base_local("¿Cuántos documentos tienes?", self.bib)
+        self.assertEqual(resp_n.intencion_chat, "conteo")
+        self.assertIn(str(resp_n.total_documentos), resp_n.texto_chat)
+
+        resp_cat = consultar_base_local("¿Qué categorías tienes?", self.bib)
+        self.assertEqual(resp_cat.intencion_chat, "categorias")
+
+    def test_como_se_hace_no_lo_secuestra_la_conversacion(self):
+        self.assertEqual(
+            detectar_intencion_conversacional("¿Cómo se hace la conciliación de inventario?"),
+            ("", ""),
+        )
+        self.assertEqual(detectar_intencion_conversacional("Hola, ¿cómo se hace el inventario?"), ("", ""))
+        resp = consultar_base_local("¿Cómo se hace la conciliación de inventario?", self.bib)
+        self.assertFalse(resp.es_chat)
+        self.assertTrue(resp.pasajes)
+
+    def test_ia_conversacional_solo_narra_el_inventario_recibido(self):
+        resp = consultar_base_local("¿Qué documentos tienes?", self.bib)
+        contexto = construir_contexto_conversacional(resp)
+        self.assertIn("Manual_Inventario_y_Conciliacion_2026", contexto)
+
+        respuesta_falsa = {
+            "choices": [{"message": {"content": "¡Claro! Tengo tu manual de inventario y conciliación."}}]
+        }
+        mock_http = MagicMock()
+        mock_http.read.return_value = json.dumps(respuesta_falsa).encode("utf-8")
+        mock_http.__enter__.return_value = mock_http
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test-123"}, clear=False):
+            with patch("urllib.request.urlopen", return_value=mock_http) as mock_open:
+                texto, prov, aviso = sintetizar_respuesta_conversacional_ia(
+                    "¿Qué documentos tienes?", contexto
+                )
+                self.assertIn("manual de inventario", texto)
+                self.assertIn("OpenAI", prov)
+                self.assertEqual(aviso, "")
+                payload = json.loads(mock_open.call_args[0][0].data.decode("utf-8"))
+                system = payload["messages"][0]["content"]
+                self.assertIn("EXCLUSIVAMENTE", system)
+                self.assertIn("biblioteca", payload["messages"][1]["content"])
 
 
 class AsistenteIATests(unittest.TestCase):

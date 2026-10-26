@@ -37,6 +37,7 @@ from modulos.asistente_inicio import (
     AdjuntoIA,
     MARCA_NO_DISPONIBLE,
     RespuestaAsistente,
+    construir_contexto_conversacional,
     construir_contexto_rag,
     consultar_base_local,
     detectar_proveedor_ia,
@@ -47,6 +48,7 @@ from modulos.asistente_inicio import (
     normalizar,
     renderizar_respuesta_asistente_html,
     sintetizar_con_ia,
+    sintetizar_respuesta_conversacional_ia,
 )
 
 try:
@@ -170,6 +172,7 @@ class _TrabajadorIA(QThread):
         historial_previo: List[Tuple[str, str]],
         adjuntos_ia: Optional[List[AdjuntoIA]] = None,
         parent=None,
+        modo: str = "manual",
     ):
         super().__init__(parent)
         self.turno_id = turno_id
@@ -177,14 +180,22 @@ class _TrabajadorIA(QThread):
         self.contexto_rag = contexto_rag
         self.historial_previo = historial_previo
         self.adjuntos_ia = list(adjuntos_ia or [])
+        self.modo = modo
 
     def run(self) -> None:
-        texto_ia, proveedor, aviso = sintetizar_con_ia(
-            self.pregunta,
-            self.contexto_rag,
-            self.historial_previo,
-            adjuntos_ia=self.adjuntos_ia,
-        )
+        if self.modo == "conversacion":
+            texto_ia, proveedor, aviso = sintetizar_respuesta_conversacional_ia(
+                self.pregunta,
+                self.contexto_rag,
+                self.historial_previo,
+            )
+        else:
+            texto_ia, proveedor, aviso = sintetizar_con_ia(
+                self.pregunta,
+                self.contexto_rag,
+                self.historial_previo,
+                adjuntos_ia=self.adjuntos_ia,
+            )
         self.resultado_listo.emit(self.turno_id, texto_ia, proveedor, aviso)
 
 
@@ -197,6 +208,8 @@ class _TurnoChat:
 
 
 CONSULTAS_RAPIDAS: Tuple[Tuple[str, str], ...] = (
+    ("👋 Hola", "Hola"),
+    ("📚 ¿Qué documentos tienes?", "¿Qué documentos tienes?"),
     ("📋 Inventario", "¿Cómo se hace el inventario?"),
     ("⚖️ Conciliación inventario", "¿Cómo se hace la conciliación de inventario?"),
     ("🗑️ Mermas", "¿Cómo se registran las mermas?"),
@@ -254,9 +267,9 @@ class Inicio(QWidget):
         layout.addLayout(fila_cabecera)
 
         subtitulo = QLabel(
-            "Pregunta con tus palabras cómo se hace cualquier proceso del cine. "
-            "El asistente genera una guía paso a paso basándose únicamente en tus "
-            "manuales y correos guardados en 📚 Conocimiento."
+            "Háblame como a una persona: di «hola», pregunta «¿qué documentos tienes?» "
+            "o pide cómo se hace cualquier proceso del cine. Solo conozco tus manuales "
+            "y correos de 📚 Conocimiento: con ellos converso y te preparo la guía paso a paso."
         )
         subtitulo.setWordWrap(True)
         subtitulo.setStyleSheet("font-size: 12.5px;")
@@ -300,7 +313,7 @@ class Inicio(QWidget):
 
         self.pregunta = QLineEdit()
         self.pregunta.setPlaceholderText(
-            "Escribe tu duda (ej.: ¿Cómo hago una conciliación? ¿Cómo se hace el inventario?) y pulsa Enter…"
+            "Escríbeme… (ej.: Hola · ¿Qué documentos tienes? · ¿Cómo se hace el inventario?) y pulsa Enter…"
         )
         self.pregunta.setStyleSheet(
             "QLineEdit { padding: 8px 12px; font-size: 13.5px; "
@@ -425,13 +438,29 @@ class Inicio(QWidget):
         self._contador_turnos += 1
         turno_id = self._contador_turnos
 
-        contexto_rag = construir_contexto_rag(respuesta) if respuesta.tiene_contenido else ""
+        # Conversación natural (hola, «qué documentos tienes»…): la narra la IA
+        # solo con el inventario real; saludos/gracias se responden al instante.
+        usar_hilo_chat = bool(
+            respuesta.es_chat
+            and respuesta.intencion_chat not in ("saludo", "gracias", "despedida")
+            and self.check_ia.isChecked()
+            and detectar_proveedor_ia() is not None
+        )
+        contexto_chat = (
+            construir_contexto_conversacional(respuesta) if usar_hilo_chat else ""
+        )
+
+        contexto_rag = (
+            "" if respuesta.es_chat
+            else (construir_contexto_rag(respuesta) if respuesta.tiene_contenido else "")
+        )
         tiene_material_ia = bool(
             respuesta.adjuntos_ia
             or (contexto_rag.strip() and not respuesta.solo_documento_sin_ocr)
         )
         ia_habilitada = bool(
-            self.check_ia.isChecked()
+            not respuesta.es_chat
+            and self.check_ia.isChecked()
             and detectar_proveedor_ia() is not None
             and respuesta.tiene_contenido
             and tiene_material_ia
@@ -449,7 +478,7 @@ class Inicio(QWidget):
         # Historial breve para dar contexto a preguntas de continuación con IA
         historial_ia: List[Tuple[str, str]] = []
         for t in self._turnos[-2:]:
-            resumen_prev = t.respuesta.texto_ia
+            resumen_prev = t.respuesta.texto_ia or t.respuesta.texto_chat
             if not resumen_prev and t.respuesta.procedimiento:
                 resumen_prev = "; ".join(t.respuesta.procedimiento.pasos[:3])
             elif not resumen_prev and t.respuesta.pasajes:
@@ -460,7 +489,7 @@ class Inicio(QWidget):
             turno_id=turno_id,
             pregunta=texto_pregunta,
             respuesta=respuesta,
-            pensando_ia=usar_hilo_ia,
+            pensando_ia=bool(usar_hilo_ia or usar_hilo_chat),
         )
         self._turnos.append(turno)
 
@@ -468,14 +497,15 @@ class Inicio(QWidget):
         self._actualizar_indicador_estado()
         self._pintar_conversacion(ir_al_final=True)
 
-        if usar_hilo_ia:
+        if usar_hilo_ia or usar_hilo_chat:
             hilo = _TrabajadorIA(
                 turno_id=turno_id,
                 pregunta=texto_pregunta,
-                contexto_rag=contexto_rag,
+                contexto_rag=contexto_chat if usar_hilo_chat else contexto_rag,
                 historial_previo=historial_ia,
-                adjuntos_ia=respuesta.adjuntos_ia,
+                adjuntos_ia=[] if usar_hilo_chat else respuesta.adjuntos_ia,
                 parent=self,
+                modo="conversacion" if usar_hilo_chat else "manual",
             )
             hilo.resultado_listo.connect(self._al_terminar_ia)
             hilo.finished.connect(lambda h=hilo: self._limpiar_hilo(h))
@@ -486,6 +516,14 @@ class Inicio(QWidget):
         for turno in self._turnos:
             if turno.turno_id == turno_id:
                 turno.pensando_ia = False
+                if turno.respuesta.es_chat:
+                    # Conversación: si la IA narró, usar su texto; si falló,
+                    # conservar la respuesta local (nunca dejar al usuario sin contestar).
+                    if texto_ia and texto_ia != MARCA_NO_DISPONIBLE:
+                        turno.respuesta.texto_chat = texto_ia
+                        turno.respuesta.proveedor_ia = proveedor
+                    self._pintar_conversacion(ir_al_final=False)
+                    break
                 if texto_ia == MARCA_NO_DISPONIBLE:
                     turno.respuesta.rechazado_por_ia = True
                     turno.respuesta.texto_ia = ""
@@ -534,11 +572,13 @@ class Inicio(QWidget):
             "👋 ¡Hola! Soy tu asistente de operativa del cine"
             "</div>"
             '<div style="font-size:13px; color:#334155; line-height:1.45; margin-bottom:8px;">'
-            "Escríbeme abajo cualquier duda como si hablaras con un compañero y buscaré "
-            "el apartado correspondiente en los procedimientos y manuales de CineStock:"
+            "Háblame como a un compañero: salúdame, pregúntame qué tengo guardado o "
+            "pídeme cómo se hace cualquier proceso. Solo sé lo que hay en tu biblioteca "
+            "de 📚 Conocimiento, y con eso te respondo paso a paso:"
             "</div>"
             '<div style="font-size:12.5px; color:#1E293B; margin-left:8px; margin-bottom:8px;">'
-            "• <i>«¿Cómo hago para hacer el inventario?»</i><br>"
+            "• <i>«Hola»</i> &nbsp;•&nbsp; <i>«¿Qué documentos tienes?»</i><br>"
+            "• <i>«¿Tienes algo sobre mermas?»</i><br>"
             "• <i>«¿Cómo se hace una conciliación y qué compruebo si hay descuadre?»</i><br>"
             "• <i>«¿Qué pasos sigo para tramitar una matinal de Disney?»</i><br>"
             "• <i>«¿Cómo registro las mermas o un albarán de Conway?»</i>"

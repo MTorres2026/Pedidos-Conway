@@ -275,6 +275,17 @@ class PasajeManual:
 
 
 @dataclass
+class DocumentoChatResumen:
+    """Ficha resumida de un documento para listarlo en el chat conversacional."""
+    doc_id: int
+    titulo: str
+    tipo: str = ""
+    fecha: str = ""
+    categoria: str = ""
+    estado: str = ""
+
+
+@dataclass
 class RespuestaAsistente:
     pregunta: str
     terminos: List[str] = field(default_factory=list)
@@ -289,12 +300,20 @@ class RespuestaAsistente:
     biblioteca_vacia: bool = False
     total_documentos: int = 0
     error_biblioteca: Optional[str] = None
+    # --- Capa conversacional (chat IA solo-biblioteca) ---
+    intencion_chat: str = ""          # saludo, inventario, tema, identidad, ...
+    texto_chat: str = ""              # respuesta natural en primera persona
+    documentos_chat: List[DocumentoChatResumen] = field(default_factory=list)
+
+    @property
+    def es_chat(self) -> bool:
+        return bool(self.texto_chat)
 
     @property
     def tiene_contenido(self) -> bool:
         if self.rechazado_por_ia:
             return False
-        return self.procedimiento is not None or bool(self.pasajes)
+        return bool(self.texto_chat) or self.procedimiento is not None or bool(self.pasajes)
 
     @property
     def solo_documento_sin_ocr(self) -> bool:
@@ -1819,11 +1838,468 @@ def guardar_cache_manual_ia(
         pass
 
 
+# ======================================================================
+# 5B) Capa conversacional: chat natural SOLO sobre su biblioteca
+# ======================================================================
+# El asistente saluda, se presenta, cuenta qué documentos/manuales guarda,
+# los lista por tema/categoría y responde en primera persona como una IA.
+# Nunca usa conocimiento externo: todo sale de biblioteca.db + conocimiento.json.
+
+_PALABRAS_TEMA_VACIAS = frozenset("""
+el la los las un una unos unas de del en y o a al por para con sin sobre
+documento documentos manual manuales correo correos guia guias informacion
+algo algun alguna algunos algunas tienes tiene hay existe existen guardado
+guardados guardada guardadas hacer como se me te por favor gracias
+""".split())
+
+
+def _limpiar_tema_chat(texto: str) -> str:
+    palabras = [
+        p for p in (
+            t.strip("¿?¡!.,;:")
+            for t in normalizar(texto or "").split()
+        )
+        if p and p not in _PALABRAS_TEMA_VACIAS and len(p) > 1
+    ]
+    return " ".join(palabras).strip()
+
+
+def detectar_intencion_conversacional(pregunta: str) -> Tuple[str, str]:
+    """
+    Devuelve (intencion, tema). ('', '') si es una consulta de manual normal
+    («¿cómo se hace…?»), que debe seguir el flujo estricto de siempre.
+    """
+    norm = re.sub(r"\s+", " ", re.sub(r"[¿?¡!.,;:]+", " ", normalizar(pregunta or ""))).strip()
+    if not norm:
+        return ("", "")
+    palabras = norm.split()
+
+    # --- Saludos / gracias / despedidas: solo si son (casi) solo eso ---
+    relleno_saludo = {
+        "hola", "buenas", "buenos", "dias", "dia", "tardes", "tarde", "noches",
+        "noche", "que", "tal", "estas", "esta", "todo", "bien", "saludos",
+        "asistente", "cinestock", "equipo", "hey",
+    }
+    if palabras[0] in ("hola", "buenas", "buenos", "hey", "saludos") and \
+            all(p in relleno_saludo for p in palabras):
+        return ("saludo", "")
+    if norm.startswith(("gracias", "muchas gracias", "mil gracias")) and len(palabras) <= 5:
+        return ("gracias", "")
+    if palabras[0] in ("adios", "chao") or norm.startswith(("hasta luego", "hasta pronto", "nos vemos")):
+        return ("despedida", "")
+
+    # --- Identidad / ayuda ---
+    if any(f in norm for f in (
+        "quien eres", "que eres", "como te llamas", "tu nombre",
+        "que puedes hacer", "que sabes hacer", "en que puedes ayudar",
+        "en que me puedes ayudar", "para que sirves", "que funciones tienes",
+        "que sabes", "que conoces",
+    )) or norm in ("ayuda", "ayudame", "necesito ayuda"):
+        return ("identidad", "")
+
+    # --- Categorías / temas disponibles ---
+    if any(f in norm for f in (
+        "que categorias", "que temas tienes", "que temas hay",
+        "categorias tienes", "temas tienes", "tipos de documentos",
+    )):
+        return ("categorias", "")
+
+    # --- Más recientes ---
+    if any(f in norm for f in (
+        "ultimos documentos", "documentos recientes", "mas recientes",
+        "documentos mas nuevos", "ultimos manuales", "que hay de nuevo",
+        "novedades tienes", "ultimas incorporaciones",
+    )):
+        return ("recientes", "")
+
+    # --- Cuántos hay ---
+    if re.search(r"\bcuantos\b.*\b(documentos|manuales|correos|archivos)\b", norm) or \
+            re.search(r"\b(numero|cantidad) de (documentos|manuales|correos)\b", norm):
+        return ("conteo", "")
+
+    # --- Documentos sobre un tema concreto ---
+    if re.search(r"\b(tienes|hay|existe|existen|guardas|busca|buscame)\b", norm):
+        m = re.search(r"\b(?:sobre|acerca de)\s+(.+)$", norm)
+        if m:
+            return ("tema", _limpiar_tema_chat(m.group(1)))
+        m = re.search(r"(?:documentos?|manual(?:es)?|correos?|guias?|algo|algun\w*)\s+(?:de|del)\s+(.+)$", norm)
+        if m:
+            return ("tema", _limpiar_tema_chat(m.group(1)))
+        m = re.search(r"\bdocumentos?\b.*\btienes\b.*\b(?:sobre|de|del)\s+(.+)$", norm)
+        if m:
+            return ("tema", _limpiar_tema_chat(m.group(1)))
+
+    # --- Inventario general de la biblioteca ---
+    if any(f in norm for f in (
+        "que documentos tienes", "que documentos hay", "cuales documentos",
+        "que manuales tienes", "que manuales hay", "lista de documentos",
+        "listame los documentos", "muestrame los documentos",
+        "muestrame tu biblioteca", "ensename tu biblioteca",
+        "que tienes guardado", "que hay guardado", "que tienes en tu biblioteca",
+        "que hay en tu biblioteca", "que hay en conocimiento",
+        "que tienes en conocimiento", "que documentos guardas",
+        "dime que documentos", "ver tu biblioteca", "tu biblioteca",
+    )) or (palabras[0] in ("muestrame", "ensename", "listame", "buscame", "busca")
+            and any(p in norm for p in ("documento", "manual", "biblioteca", "correo"))):
+        return ("inventario", "")
+
+    return ("", "")
+
+
+def _obtener_resumenes_biblioteca(biblioteca, limite: int = 500) -> List[DocumentoChatResumen]:
+    if biblioteca is None:
+        return []
+    try:
+        resultados = biblioteca.listar("todos", limite)
+    except Exception:
+        return []
+    resumenes: List[DocumentoChatResumen] = []
+    for r in resultados or []:
+        try:
+            resumenes.append(DocumentoChatResumen(
+                doc_id=int(getattr(r, "id", 0)),
+                titulo=str(getattr(r, "titulo", "") or "(sin título)"),
+                tipo=str(getattr(r, "tipo", "") or ""),
+                fecha=str(getattr(r, "fecha", "") or ""),
+                categoria=str(getattr(r, "categoria", "") or ""),
+                estado=str(getattr(r, "estado", "") or ""),
+            ))
+        except Exception:
+            continue
+    return resumenes
+
+
+def _filtrar_resumenes_por_tema(
+    resumenes: Sequence[DocumentoChatResumen], tema: str, limite: int = 40
+) -> List[DocumentoChatResumen]:
+    tema_limpio = _limpiar_tema_chat(tema)
+    if not tema_limpio:
+        return list(resumenes[:limite])
+    _, ranuras = extraer_terminos_consulta(tema_limpio)
+    if not ranuras:
+        return []
+    salida: List[DocumentoChatResumen] = []
+    for r in resumenes:
+        texto_norm = normalizar(f"{r.titulo} {r.categoria} {r.tipo}")
+        if all(_ranura_coincide_en(ranura, texto_norm) for ranura in ranuras):
+            salida.append(r)
+        if len(salida) >= limite:
+            break
+    return salida
+
+
+def _texto_conversacional_local(
+    intencion: str,
+    tema: str,
+    resumenes: Sequence[DocumentoChatResumen],
+    filtrados: Sequence[DocumentoChatResumen],
+    total: int,
+    biblioteca_vacia: bool,
+) -> str:
+    """Respuesta natural en primera persona, construida solo con datos reales."""
+    procs = _cargar_lista_procedimientos()
+    titulos_procs = [str(p.get("titulo", "")).strip() for p in procs if p.get("titulo")]
+
+    if intencion == "saludo":
+        if biblioteca_vacia:
+            return (
+                "¡Hola! 👋 Encantado de saludarte. Soy el asistente de CineStock y "
+                "trabajo únicamente con los manuales y correos que guardas en "
+                "📚 Conocimiento. De momento todavía no tienes documentos cargados, "
+                "pero en cuanto añadas tus PDF, presentaciones o correos podré "
+                "explicarte cualquier procedimiento paso a paso. ¿Por dónde quieres empezar?"
+            )
+        return (
+            f"¡Hola! 👋 Me alegro de verte. Soy tu asistente del cine y ahora mismo "
+            f"tengo a mano **{total} documento(s)** en tu biblioteca de 📚 Conocimiento, "
+            "además de los procedimientos confirmados. Pregúntame con tus palabras "
+            "cómo se hace cualquier proceso (inventario, mermas, un albarán…) o dime "
+            "«¿qué documentos tienes?» y te los enseño. ¿En qué te ayudo?"
+        )
+
+    if intencion == "gracias":
+        return (
+            "¡De nada! 😊 Para eso estoy. Si necesitas otro procedimiento, "
+            "quieres que te enseñe qué documentos tengo guardados o que te abra "
+            "algún manual original, pídeme lo que sea."
+        )
+
+    if intencion == "despedida":
+        return (
+            "¡Hasta luego! 👋 Aquí me quedo con tu biblioteca preparada para "
+            "cuando vuelvas. Que vaya bien el turno."
+        )
+
+    if intencion == "identidad":
+        lineas = [
+            "Soy el asistente de operativa de CineStock 🤖, como un compañero que se ha "
+            "leído de cabo a rabo todo lo que guardas en 📚 Conocimiento.",
+            "",
+            "Esto es lo que puedo hacer por ti, siempre usando **solo** tu biblioteca "
+            "(no busco nada fuera ni me invento respuestas):",
+            "• Si me preguntas «¿cómo se hace…?», te preparo el manual paso a paso del "
+            "proceso exacto, y si no lo tengo te lo digo claramente con un «No disponible».",
+            "• Si me dices «¿qué documentos tienes?» o «¿tienes algo sobre mermas?», "
+            "te enseño lo que tengo guardado y te lo abro con un clic.",
+            "• También entiendo saludos y conversación normal: pregúntame con tus palabras.",
+        ]
+        if titulos_procs:
+            lineas.append("")
+            lineas.append("Procedimientos confirmados que domino: " +
+                           "; ".join(titulos_procs) + ".")
+        if not biblioteca_vacia:
+            lineas.append(f"En total consulto {total} documento(s) de tu biblioteca.")
+        return "\n".join(lineas)
+
+    if biblioteca_vacia and intencion in ("inventario", "tema", "conteo", "categorias", "recientes"):
+        return (
+            "Ahora mismo mi biblioteca está vacía: todavía no hay correos ni manuales "
+            "en 📚 Conocimiento, así que no tengo documentos que enseñarte. "
+            "Añade tus PDF, Word, PowerPoint o correos desde 📚 Conocimiento → "
+            "«➕ Añadir correos / documentos…» y enseguida podré listártelos y "
+            "explicarte sus procedimientos paso a paso."
+        )
+
+    if intencion == "conteo":
+        n_correos = sum(1 for r in resumenes if r.tipo == "correo")
+        n_docs = len(resumenes) - n_correos
+        return (
+            f"Tengo guardados **{total} documento(s)** en tu biblioteca: "
+            f"{n_docs} documento(s)/manual(es) y {n_correos} correo(s). "
+            "Si quieres, dime «¿qué documentos tienes?» y te los enseño todos, "
+            "o pregúntame por un tema concreto, por ejemplo «¿tienes algo sobre inventarios?»."
+        )
+
+    if intencion == "categorias":
+        conteo_cat: Dict[str, int] = {}
+        for r in resumenes:
+            conteo_cat[r.categoria or "Otros"] = conteo_cat.get(r.categoria or "Otros", 0) + 1
+        temas = "; ".join(
+            f"{cat} ({n})" for cat, n in sorted(conteo_cat.items(), key=lambda x: -x[1])
+        )
+        return (
+            f"Mis documentos están organizados en estos temas: {temas}. "
+            "Dime un tema («¿qué tienes de inventario?») y te enseño sus documentos, "
+            "o pregúntame directamente cómo se hace un proceso y te preparo el paso a paso."
+        )
+
+    if intencion == "recientes":
+        return (
+            "Estos son los documentos más recientes que tengo en tu biblioteca, "
+            "ordenados de más nuevo a más antiguo. Pulsa en cualquiera para abrirlo. "
+            "Si buscas un proceso concreto, pregúntame «¿cómo se hace…?» y te preparo la guía."
+        )
+
+    if intencion == "tema":
+        tema_mostrar = tema.strip() or "ese tema"
+        if not filtrados:
+            return (
+                f"He mirado bien en mi biblioteca y no tengo ningún documento sobre "
+                f"«{tema_mostrar}». No quiero inventarme nada: solo respondo con lo que "
+                "tienes guardado en 📚 Conocimiento. Si tienes el manual fuera de CineStock, "
+                "añádelo desde 📚 Conocimiento y lo aprendo al instante. "
+                "Si quieres, dime «¿qué documentos tienes?» y te enseño todo lo que sí tengo."
+            )
+        return (
+            f"¡Sí! Sobre «{tema_mostrar}» tengo **{len(filtrados)} documento(s)** en tu "
+            "biblioteca. Te los dejo aquí debajo y puedes abrir el original con un clic. "
+            f"Y si lo que quieres es el paso a paso, pregúntame «¿cómo se hace lo de {tema_mostrar}?» "
+            "y te preparo la guía completa."
+        )
+
+    # inventario general
+    conteo_cat: Dict[str, int] = {}
+    for r in resumenes:
+        conteo_cat[r.categoria or "Otros"] = conteo_cat.get(r.categoria or "Otros", 0) + 1
+    resumen_cat = ""
+    if conteo_cat:
+        resumen_cat = " Por temas: " + "; ".join(
+            f"{cat} ({n})" for cat, n in sorted(conteo_cat.items(), key=lambda x: -x[1])[:6]
+        ) + "."
+    extra_procs = ""
+    if titulos_procs:
+        extra_procs = (" Además domino estos procedimientos confirmados: " +
+                       "; ".join(titulos_procs) + ".")
+    return (
+        f"Claro, te enseño mi biblioteca. Ahora mismo tengo **{total} documento(s)** "
+        f"guardados en 📚 Conocimiento.{resumen_cat}{extra_procs} "
+        "Aquí debajo tienes la lista: abre cualquier documento con un clic, o pregúntame "
+        "«¿cómo se hace…?» y te preparo el manual paso a paso de ese proceso."
+    )
+
+
+def construir_contexto_conversacional(respuesta: RespuestaAsistente) -> str:
+    """Inventario real (solo datos de la biblioteca) para que la IA lo narre."""
+    lineas = [
+        f"Total de documentos en la biblioteca: {respuesta.total_documentos}",
+    ]
+    if respuesta.documentos_chat:
+        lineas.append("Documentos relevantes para esta conversación:")
+        for d in respuesta.documentos_chat[:40]:
+            extra = " · ".join(x for x in (d.tipo, d.categoria, d.fecha) if x)
+            lineas.append(f"- (id {d.doc_id}) {d.titulo}" + (f" [{extra}]" if extra else ""))
+    procs = _cargar_lista_procedimientos()
+    if procs:
+        lineas.append("Procedimientos confirmados: " +
+                      "; ".join(str(p.get("titulo", "")) for p in procs if p.get("titulo")))
+    if respuesta.texto_chat:
+        lineas.append("Respuesta ya preparada con esos datos:\n" + respuesta.texto_chat)
+    return "\n".join(lineas)
+
+
+_PROMPT_SISTEMA_CHAT = (
+    "Eres el asistente de CineStock, el compañero IA del personal de un cine. "
+    "Hablas en español, en primera persona, con naturalidad y cercanía (como una "
+    "persona: saluda, responde a lo que te preguntan y ofrece ayuda), pero tu "
+    "conocimiento se limita EXCLUSIVAMENTE a los datos de la biblioteca del cine "
+    "que recibes en el mensaje (documentos, manuales y procedimientos confirmados). "
+    "REGLAS ESTRICTAS: 1) No uses conocimiento externo ni de actualidad (nada de "
+    "deportes, noticias, cultura general o datos que no estén en los datos "
+    "recibidos). 2) No inventes documentos, títulos, fechas ni procedimientos: "
+    "menciona solo los que aparezcan en los datos. 3) Si te preguntan algo que no "
+    "está en la biblioteca, dilo con amabilidad y ofrece enseñar los documentos "
+    "que sí tienes o explicar un procedimiento guardado. 4) Sé breve y claro: "
+    "2-5 frases o una lista corta. Sin bloques de código ni formato de manual "
+    "paso a paso (eso ya lo hace otra parte del programa)."
+)
+
+
+def sintetizar_respuesta_conversacional_ia(
+    pregunta: str,
+    contexto_biblioteca: str,
+    historial_turnos: Optional[Sequence[Tuple[str, str]]] = None,
+    timeout: float = 45.0,
+) -> Tuple[str, str, str]:
+    """Narra la respuesta del chat con IA, anclada solo al inventario real."""
+    deteccion = detectar_proveedor_ia()
+    if not deteccion or not contexto_biblioteca.strip():
+        return ("", "", "")
+    proveedor, api_key = deteccion
+
+    resumen_historial = ""
+    if historial_turnos:
+        partes_h = [
+            f"Usuario: {q}\nAsistente: {a[:200]}"
+            for q, a in list(historial_turnos)[-2:] if q and a
+        ]
+        if partes_h:
+            resumen_historial = "CONVERSACIÓN PREVIA:\n" + "\n".join(partes_h) + "\n\n"
+
+    mensaje_usuario = (
+        f"{resumen_historial}"
+        f"EL USUARIO DICE:\n{pregunta}\n\n"
+        f"DATOS REALES DE SU BIBLIOTECA (tu única fuente):\n{contexto_biblioteca}"
+    )
+
+    try:
+        if proveedor == "OpenAI":
+            modelo = _leer_clave_env_local("OPENAI_MODEL") or "gpt-4.1-mini"
+            datos = _peticion_json_https(
+                "https://api.openai.com/v1/chat/completions",
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {api_key}",
+                },
+                payload={
+                    "model": modelo,
+                    "temperature": 0.3,
+                    "max_tokens": 700,
+                    "messages": [
+                        {"role": "system", "content": _PROMPT_SISTEMA_CHAT},
+                        {"role": "user", "content": mensaje_usuario},
+                    ],
+                },
+                timeout=timeout,
+            )
+            texto = (
+                datos.get("choices", [{}])[0]
+                .get("message", {})
+                .get("content", "")
+                .strip()
+            )
+            return (texto, f"OpenAI · {modelo}", "") if texto else ("", proveedor, "")
+
+        if proveedor == "Gemini":
+            modelo = _leer_clave_env_local("GEMINI_MODEL") or "gemini-2.5-flash"
+            url = (
+                "https://generativelanguage.googleapis.com/v1beta/models/"
+                f"{modelo}:generateContent"
+            )
+            datos = _peticion_json_https(
+                url,
+                headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
+                payload={
+                    "system_instruction": {"parts": [{"text": _PROMPT_SISTEMA_CHAT}]},
+                    "contents": [{"parts": [{"text": mensaje_usuario}]}],
+                    "generationConfig": {"temperature": 0.3, "maxOutputTokens": 700},
+                },
+                timeout=timeout,
+            )
+            candidatos = datos.get("candidates", [])
+            partes = (
+                candidatos[0].get("content", {}).get("parts", [])
+                if candidatos else []
+            )
+            texto = "".join(p.get("text", "") for p in partes).strip()
+            return (texto, f"Gemini · {modelo}", "") if texto else ("", proveedor, "")
+    except urllib.error.HTTPError as err:
+        return ("", proveedor, _explicar_http_error(proveedor, err))
+    except Exception:
+        return ("", proveedor, "IA no disponible ahora mismo.")
+    return ("", "", "")
+
+
 def consultar_base_local(
     pregunta: str,
     biblioteca=None,
     historial_preguntas: Optional[Sequence[str]] = None,
 ) -> RespuestaAsistente:
+    # 0) ¿Es conversación (saludo, «qué documentos tienes»…)? Respuesta natural
+    intencion_chat, tema_chat = detectar_intencion_conversacional(pregunta)
+    if intencion_chat:
+        total_chat = 0
+        vacia_chat = True
+        error_chat: Optional[str] = None
+        resumenes_chat: List[DocumentoChatResumen] = []
+        if biblioteca is not None:
+            try:
+                stats_chat = biblioteca.estadisticas()
+                total_chat = int(stats_chat.get("total", 0))
+                vacia_chat = total_chat == 0
+                if not vacia_chat:
+                    resumenes_chat = _obtener_resumenes_biblioteca(biblioteca)
+            except Exception as e:
+                error_chat = str(e)
+        if intencion_chat == "tema":
+            documentos_chat = _filtrar_resumenes_por_tema(resumenes_chat, tema_chat)
+            if not documentos_chat and biblioteca is not None and tema_chat:
+                # Respaldo por contenido completo (FTS): el tema puede estar
+                # dentro del manual aunque no figure en su título.
+                try:
+                    por_id = {r.doc_id: r for r in resumenes_chat}
+                    documentos_chat = [
+                        por_id[int(r.id)] for r in biblioteca.buscar(tema_chat, "todos", 40)
+                        if int(getattr(r, "id", 0)) in por_id
+                    ][:40]
+                except Exception:
+                    documentos_chat = []
+        elif intencion_chat in ("inventario", "recientes"):
+            documentos_chat = list(resumenes_chat[:40])
+        else:
+            documentos_chat = []
+        return RespuestaAsistente(
+            pregunta=pregunta,
+            intencion_chat=intencion_chat,
+            texto_chat=_texto_conversacional_local(
+                intencion_chat, tema_chat, resumenes_chat,
+                documentos_chat, total_chat, vacia_chat,
+            ),
+            documentos_chat=documentos_chat,
+            biblioteca_vacia=vacia_chat,
+            total_documentos=total_chat,
+            error_biblioteca=error_chat,
+        )
+
     terminos, ranuras = extraer_terminos_consulta(pregunta, historial_preguntas)
     proc = buscar_procedimiento_confirmado(pregunta, terminos)
 
@@ -3089,9 +3565,12 @@ def _html_cartel_no_disponible(respuesta: RespuestaAsistente) -> str:
         )
     else:
         sub = (
-            "No figura ningún manual paso a paso en <b>📚 Conocimiento</b> para este proceso. "
-            "Si tienes el archivo fuera de CineStock, incorpóralo desde <b>📚 Conocimiento → "
-            "➕ Añadir correos / documentos…</b>"
+            "He buscado en toda mi biblioteca y no tengo ningún manual paso a paso sobre "
+            "eso en <b>📚 Conocimiento</b>. Solo respondo con lo que tienes guardado, así "
+            "que prefiero decírtelo claramente a inventarme algo. Si tienes el archivo "
+            "fuera de CineStock, incorpóralo desde <b>📚 Conocimiento → "
+            "➕ Añadir correos / documentos…</b> y lo aprendo al momento. "
+            "Puedes decirme también «¿qué documentos tienes?» para ver todo lo que sí domino."
         )
 
     return (
@@ -3110,11 +3589,78 @@ def _html_cartel_no_disponible(respuesta: RespuestaAsistente) -> str:
     )
 
 
+def _formatear_texto_chat_html(texto: str) -> str:
+    esc = html.escape(texto or "")
+    esc = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", esc)
+    return esc.replace("\n", "<br>")
+
+
+def _html_respuesta_chat(respuesta: RespuestaAsistente, pensando_ia: bool = False) -> str:
+    if pensando_ia:
+        return (
+            '<table width="100%" cellpadding="12" cellspacing="0" bgcolor="#EFF6FF" '
+            'style="border:1px solid #BFDBFE; margin-bottom:8px;">'
+            "<tr><td>"
+            f'<div style="font-family:{FUENTE_UI}; color:#1E3A8A; font-size:13px;">'
+            "💬 Un momento, estoy consultando tu biblioteca…"
+            "</div></td></tr></table>"
+        )
+    partes = [
+        '<table width="100%" cellpadding="13" cellspacing="0" bgcolor="#F0F9FF" '
+        'style="border:1px solid #7DD3FC; border-left:5px solid #0284C7; margin-bottom:8px;">'
+        "<tr><td>"
+        f'<div style="font-family:{FUENTE_UI}; font-size:11px; font-weight:bold; '
+        'color:#0369A1; margin-bottom:4px;">🤖 TU ASISTENTE DE CINESTOCK</div>'
+        f'<div style="font-family:{FUENTE_UI}; font-size:13.5px; color:#0F172A; '
+        f'line-height:1.55;">{_formatear_texto_chat_html(respuesta.texto_chat)}</div>'
+    ]
+    if respuesta.proveedor_ia:
+        partes.append(
+            f'<div style="font-family:{FUENTE_UI}; font-size:11px; color:#64748B; '
+            f'margin-top:6px;">Respondido con {html.escape(respuesta.proveedor_ia)} '
+            "usando solo tu biblioteca</div>"
+        )
+    partes.append("</td></tr></table>")
+
+    if respuesta.documentos_chat:
+        filas: List[str] = []
+        for d in respuesta.documentos_chat:
+            icono = ICONOS_DOC.get(d.tipo, "📄 Manual")
+            meta = " · ".join(x for x in (d.categoria, d.fecha) if x)
+            estrella = " ⭐" if d.estado == "DESTACADO" else ""
+            filas.append(
+                '<tr><td style="padding:7px 9px; border-bottom:1px solid #E2E8F0;">'
+                f'<span style="font-family:{FUENTE_UI}; font-size:12.5px;">{icono}{estrella} </span>'
+                f'<a href="abrir:{d.doc_id}" style="font-family:{FUENTE_UI}; '
+                f'font-size:13px; color:#1D4ED8; font-weight:bold; text-decoration:none;">'
+                f"{html.escape(d.titulo)}</a>"
+                + (f'<br><span style="font-family:{FUENTE_UI}; font-size:11.5px; '
+                   f'color:#64748B; margin-left:4px;">{html.escape(meta)}</span>' if meta else "")
+                + "</td></tr>"
+            )
+        partes.append(
+            '<table width="100%" cellpadding="0" cellspacing="0" bgcolor="#FFFFFF" '
+            'style="border:1px solid #CBD5E1; margin-bottom:8px;">'
+            + "".join(filas) + "</table>"
+        )
+        if respuesta.total_documentos > len(respuesta.documentos_chat) and \
+                respuesta.intencion_chat in ("inventario", "recientes"):
+            partes.append(
+                f'<div style="font-family:{FUENTE_UI}; font-size:11.5px; color:#64748B; '
+                f'margin-bottom:6px;">Te muestro {len(respuesta.documentos_chat)} de '
+                f"{respuesta.total_documentos}; pídeme un tema concreto y te lo afino.</div>"
+            )
+    return "".join(partes)
+
+
 def renderizar_respuesta_asistente_html(
     respuesta: RespuestaAsistente,
     pensando_ia: bool = False,
     turno_id: int = 0,
 ) -> str:
+    if respuesta.es_chat:
+        return _html_respuesta_chat(respuesta, pensando_ia=pensando_ia)
+
     if not respuesta.tiene_contenido:
         return _html_cartel_no_disponible(respuesta)
 
