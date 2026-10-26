@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
 )
 
 from modulos.asistente_inicio import (
+    MARCA_NO_DISPONIBLE,
     RespuestaAsistente,
     construir_contexto_rag,
     consultar_base_local,
@@ -188,9 +189,9 @@ class _TurnoChat:
 
 CONSULTAS_RAPIDAS: Tuple[Tuple[str, str], ...] = (
     ("📋 Inventario", "¿Cómo se hace el inventario?"),
-    ("⚖️ Conciliación", "¿Cómo se hace una conciliación de inventario?"),
-    ("🗑️ Mermas / bajas", "¿Cómo se registran las mermas o bajas de producto?"),
-    ("📦 Pedido ERP", "¿Cómo se tramita un pedido en el ERP?"),
+    ("⚖️ Conciliación inventario", "¿Cómo se hace la conciliación de inventario?"),
+    ("🗑️ Mermas", "¿Cómo se registran las mermas?"),
+    ("📦 Solicitud de pedido", "¿Cómo se hace una solicitud de pedido?"),
     ("🚚 Recepción / albarán", "¿Cómo se registra un albarán o recepción?"),
     ("🎓 Matinales", "¿Cómo gestionamos una matinal de un colegio?"),
 )
@@ -461,7 +462,11 @@ class Inicio(QWidget):
         for turno in self._turnos:
             if turno.turno_id == turno_id:
                 turno.pensando_ia = False
-                turno.respuesta.texto_ia = texto_ia
+                if texto_ia == MARCA_NO_DISPONIBLE:
+                    turno.respuesta.rechazado_por_ia = True
+                    turno.respuesta.texto_ia = ""
+                else:
+                    turno.respuesta.texto_ia = texto_ia
                 turno.respuesta.proveedor_ia = proveedor
                 turno.respuesta.aviso_ia = aviso
                 self._pintar_conversacion(ir_al_final=False)

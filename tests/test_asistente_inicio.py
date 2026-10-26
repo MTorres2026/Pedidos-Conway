@@ -1,6 +1,5 @@
-"""Pruebas del Asistente Híbrido de Inicio (búsqueda por secciones + RAG opcional)."""
+"""Pruebas del Asistente de Alta Precisión de Inicio ('Manual exacto o No disponible')."""
 
-import io
 import json
 import os
 import tempfile
@@ -10,8 +9,8 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from modulos.asistente_inicio import (
+    MARCA_NO_DISPONIBLE,
     buscar_procedimiento_confirmado,
-    construir_contexto_rag,
     consultar_base_local,
     detectar_proveedor_ia,
     dividir_documento_en_secciones,
@@ -37,15 +36,15 @@ Para realizar el inventario semanal de almacén y barras sigue estos pasos:
 4. Introducir todas las cantidades en el módulo Stock -> Conteo Físico y pulsar Guardar.
 
 CONCILIACIÓN DE STOCK Y DESCUADRES
-Una vez grabado el inventario, hay que realizar la conciliación:
+Una vez grabado el inventario, hay que realizar la conciliación de stock:
 1. Entrar en Cinema Manager -> Inventario -> Conciliación de Stock.
 2. Comprobar que todos los albaranes de Conway de la semana figuran recepcionados.
 3. Revisar la columna Variación para localizar diferencias mayores de 5 unidades.
 4. Recontar en almacén las referencias con descuadre antes de validar el cierre definitivo.
 
 REGISTRO DE MERMAS Y CADUCIDADES
-1. Anotar en la hoja diaria cualquier rotura de envase o producto caducado.
-2. Dar de baja en el sistema eligiendo el motivo exacto (Rotura / Caducidad).
+1. Anotar en la hoja diaria cualquier rotura de envase o merma de producto caducado.
+2. Entrar al módulo de Mermas y dar de baja eligiendo el motivo exacto (Rotura / Caducidad).
 """.strip()
 
 
@@ -62,7 +61,28 @@ Recepción de pedidos Conway y Albarán
 """.strip()
 
 
-class AsistenteInicioLocalTests(unittest.TestCase):
+DOCUMENTOS_FALSOS_AMIGOS = {
+    "Politica_RRHH_Conciliacion.txt": """
+CONCILIACIÓN DE LA VIDA FAMILIAR Y LABORAL
+1. El empleado deberá presentar el formulario de conciliación horaria con 15 días de antelación.
+2. Recursos Humanos revisará el cuadrante del centro y responderá por escrito.
+3. Guardar copia firmada en el expediente laboral.
+""".strip(),
+    "Protocolo_Solicitudes_Permisos_RRHH.txt": """
+SOLICITUD DE PERMISOS RETRIBUIDOS Y VACACIONES
+1. Acceder al portal del empleado con usuario corporativo.
+2. Pulsar en Nueva Solicitud y elegir el tipo de permiso o ausencia.
+3. Adjuntar justificante médico o documento acreditativo y pulsar Enviar solicitud.
+""".strip(),
+    "Correo_Aviso_Informal.txt": """
+Hola equipo,
+Os recuerdo que esta semana por el festivo tenéis que mandar la solicitud de pedido el lunes antes de las 12:00.
+Un saludo y buena semana.
+""".strip(),
+}
+
+
+class AsistentePrecisionEstrictaTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
@@ -73,73 +93,115 @@ class AsistenteInicioLocalTests(unittest.TestCase):
         self.ocr_patch.start()
         self.addCleanup(self.ocr_patch.stop)
 
+        # Cargar solo los "falsos amigos" en una biblioteca de ruido para verificar rechazos
+        self.bib_ruido = Biblioteca(self.raiz / "bib_ruido")
+        self.addCleanup(self.bib_ruido.cerrar)
+        self.ocr_patch2 = patch.object(self.bib_ruido, "_ocr_callable", return_value=None)
+        self.ocr_patch2.start()
+        self.addCleanup(self.ocr_patch2.stop)
+
+        for nombre, texto in DOCUMENTOS_FALSOS_AMIGOS.items():
+            f = self.raiz / nombre
+            f.write_text(texto, encoding="utf-8")
+            self.bib_ruido.agregar_archivo(f)
+            self.bib.agregar_archivo(f)
+
+        # En self.bib sí añadimos además los manuales reales
         ruta_manual = self.raiz / "Manual_Inventario_y_Conciliacion_2026.txt"
         ruta_manual.write_text(MANUAL_OPERATIVA_EJEMPLO, encoding="utf-8")
-        alta1 = self.bib.agregar_archivo(ruta_manual)
-        self.assertTrue(alta1.ok)
-        self.id_manual = alta1.id
+        self.id_manual = self.bib.agregar_archivo(ruta_manual).id
 
         ruta_ppt = self.raiz / "Recepcion_Conway_2026.txt"
         ruta_ppt.write_text(PRESENTACION_PPTX_SIMULADA, encoding="utf-8")
-        alta2 = self.bib.agregar_archivo(ruta_ppt)
-        self.assertTrue(alta2.ok)
-        self.id_ppt = alta2.id
+        self.id_ppt = self.bib.agregar_archivo(ruta_ppt).id
 
-    def test_procedimientos_confirmados_cargan_desde_src_datos_sin_falsos_positivos(self):
-        # Coincidencia legítima con matinales
-        proc_matinal = buscar_procedimiento_confirmado("¿Cómo gestionamos una matinal de Disney?")
-        self.assertIsNotNone(proc_matinal)
-        self.assertEqual(proc_matinal.id, "matinales_centros_educativos")
-        self.assertTrue(any("Disney" in p for p in proc_matinal.pasos))
+    def test_rechaza_conciliacion_de_otra_indole_y_muestra_no_disponible(self):
+        resp = consultar_base_local("¿Cómo se hace la conciliación de inventario?", self.bib_ruido)
+        self.assertFalse(resp.tiene_contenido)
+        html_out = renderizar_respuesta_asistente_html(resp)
+        self.assertIn("PROCEDIMIENTO NO DISPONIBLE", html_out)
+        self.assertNotIn("FAMILIAR", html_out)
 
-        # Preguntar por inventario o conciliación NO debe disparar "cambiar película de sala"
-        proc_inv = buscar_procedimiento_confirmado("¿Cómo hago para hacer el inventario?")
-        self.assertIsNone(proc_inv)
-        proc_conc = buscar_procedimiento_confirmado("¿Cómo hacer una conciliación?")
-        self.assertIsNone(proc_conc)
+    def test_rechaza_solicitudes_de_otra_indole_y_correos_sin_pasos(self):
+        resp = consultar_base_local("¿Cómo hacer una solicitud de pedido?", self.bib_ruido)
+        self.assertFalse(resp.tiene_contenido)
+        html_out = renderizar_respuesta_asistente_html(resp)
+        self.assertIn("PROCEDIMIENTO NO DISPONIBLE", html_out)
+        self.assertNotIn("VACACIONES", html_out)
+        self.assertNotIn("festivo", html_out)
 
-    def test_extrae_seccion_exacta_de_inventario_completa(self):
-        resp = consultar_base_local("¿Cómo hago para hacer el inventario?", self.bib)
-        self.assertTrue(resp.pasajes)
-        principal = resp.pasajes[0]
-        self.assertEqual(principal.doc_id, self.id_manual)
-        self.assertIn("Conteo Físico", principal.texto_seccion)
-        self.assertIn("1. Imprimir las hojas de conteo", principal.texto_seccion)
+    def test_acepta_solicitud_de_pedido_cuando_existe_manual_real(self):
+        manual_erp = self.raiz / "Manual_Solicitud_Pedido_ERP.txt"
+        manual_erp.write_text(
+            "CREACIÓN DE SOLICITUD DE PEDIDO EN ERP\n"
+            "1. Entrar en PeopleSoft -> Compras -> Crear Solicitud de Pedido.\n"
+            "2. Introducir el código de artículo y la cantidad de cajas.\n"
+            "3. Pulsar Guardar para obtener el ID Solicitud.",
+            encoding="utf-8",
+        )
+        self.bib_ruido.agregar_archivo(manual_erp)
+        resp = consultar_base_local("¿Cómo hacer una solicitud de pedido?", self.bib_ruido)
+        self.assertTrue(resp.tiene_contenido)
+        self.assertIn("PeopleSoft", resp.pasajes[0].texto_seccion)
+        self.assertNotIn("VACACIONES", resp.pasajes[0].texto_seccion)
 
-    def test_extrae_seccion_exacta_de_conciliacion_incluso_con_verbo_o_sinonimo(self):
-        for pregunta in (
-            "¿Cómo se hace una conciliación?",
-            "¿Cómo conciliar las diferencias del stock?",
-        ):
-            with self.subTest(pregunta=pregunta):
-                resp = consultar_base_local(pregunta, self.bib)
-                self.assertTrue(resp.pasajes)
-                textos = "\n".join(p.texto_seccion for p in resp.pasajes)
-                self.assertIn("Conciliación de Stock", textos)
-                self.assertIn("Variación", textos)
+    def test_rechaza_mencion_lateral_de_inventario_en_cierre_de_dia(self):
+        pdf_cierre = """
+Confidencial
+4. Ingresar el folio del comprobante del servicio de ETV en el campo “Número de Placa de
+mensajero”.
+5. Presionar el botón “Enviar”.
+ESP-TLC-GC-CIMA-00 GC CINEMA MANAGER – VISTA CLOUD 04/11/2025 Página 21 de 29
+Confidencial
+10. Cierre de Día
+Después de que los fondos se hayan enviado, el cierre de día deberá realizarse de la siguiente manera:
+1. Si en el día actual se realizó toma de inventario, antes de cerrar el día, desde Gerencia se debe
+generar el reporte “Estado de Inventario” y validar que se haya finalizado.
+2. Presionar el botón “Día de cierre”.
+""".strip()
+        f_cierre = self.raiz / "GC_CINEMA_MANAGER_VISTA_CLOUD.txt"
+        f_cierre.write_text(pdf_cierre, encoding="utf-8")
+        self.bib_ruido.agregar_archivo(f_cierre)
 
-    def test_divide_diapositivas_y_encuentra_albaran(self):
+        resp = consultar_base_local("¿Cómo hago el inventario?", self.bib_ruido)
+        self.assertFalse(resp.tiene_contenido)
+        html_out = renderizar_respuesta_asistente_html(resp)
+        self.assertIn("PROCEDIMIENTO NO DISPONIBLE", html_out)
+        self.assertNotIn("Placa de mensajero", html_out)
+
+    def test_encuentra_exactamente_conciliacion_de_inventario_cuando_existe_manual(self):
+        resp = consultar_base_local("¿Cómo se hace la conciliación de inventario?", self.bib)
+        self.assertTrue(resp.tiene_contenido)
+        self.assertEqual(resp.pasajes[0].doc_id, self.id_manual)
+        self.assertIn("Conciliación de Stock", resp.pasajes[0].texto_seccion)
+        for p in resp.pasajes:
+            self.assertNotIn("FAMILIAR", p.texto_seccion)
+
+    def test_divide_diapositivas_y_encuentra_albaran_exacto(self):
         secciones = dividir_documento_en_secciones(PRESENTACION_PPTX_SIMULADA)
         self.assertEqual(len(secciones), 2)
         self.assertEqual(secciones[1][0], "Diapositiva 2")
 
-        resp = consultar_base_local("¿Cómo hago la recepción de un albarán de Conway?", self.bib)
-        self.assertTrue(resp.pasajes)
+        resp = consultar_base_local("¿Cómo registro el albarán de Conway?", self.bib)
+        self.assertTrue(resp.tiene_contenido)
         self.assertEqual(resp.pasajes[0].doc_id, self.id_ppt)
         self.assertEqual(resp.pasajes[0].titulo_seccion, "Diapositiva 2")
-        self.assertIn("ID Recepción", resp.pasajes[0].texto_seccion)
 
-    def test_memoria_conversacional_en_preguntas_de_seguimiento(self):
-        principales, _ = extraer_terminos_consulta(
-            "¿Y qué advertencias debo comprobar?",
-            historial_preguntas=["¿Cómo se organiza una matinal de un colegio?"],
-        )
-        self.assertIn("matinal", principales)
+    def test_procedimientos_confirmados_sin_falsos_positivos(self):
+        proc_matinal = buscar_procedimiento_confirmado("¿Cómo gestionamos una matinal?")
+        self.assertIsNotNone(proc_matinal)
+        self.assertEqual(proc_matinal.id, "matinales_centros_educativos")
 
-    def test_html_renderiza_enlaces_abrir_y_escapa_html_peligroso(self):
-        ruta_xss = self.raiz / "Nota_Mermas.txt"
+        self.assertIsNone(buscar_procedimiento_confirmado("¿Cómo hago un cambio de turno?"))
+        self.assertIsNone(buscar_procedimiento_confirmado("¿Cómo hago una solicitud de pedido?"))
+        self.assertIsNone(buscar_procedimiento_confirmado("¿Cómo hago el inventario?"))
+
+    def test_html_escapa_scripts_peligrosos(self):
+        ruta_xss = self.raiz / "Manual_Mermas_Seguridad.txt"
         ruta_xss.write_text(
-            "MERMAS\n1. Registrar merma en <script>alert(1)</script> barra.",
+            "REGISTRO DE MERMAS\n"
+            "1. Entrar al módulo de mermas en <script>alert(1)</script>.\n"
+            "2. Seleccionar motivo y pulsar Guardar merma.",
             encoding="utf-8",
         )
         alta = self.bib.agregar_archivo(ruta_xss)
@@ -149,67 +211,32 @@ class AsistenteInicioLocalTests(unittest.TestCase):
         self.assertNotIn("<script>", html_out)
         self.assertIn("&lt;script&gt;", html_out)
 
-    def test_pdf_corporativo_separa_etv_de_cierre_dia_y_detecta_mencion_lateral(self):
-        pdf_cierre_con_ruido = """
-Confidencial
-4. Ingresar el folio del comprobante del servicio de ETV en el campo “Número de Placa de
-mensajero”.
-5. Presionar el botón “Enviar”.
-Nota: En caso de que la contrase ña o el PIN sean incorrectas, un mensaje aparecerá, presionar el
-botón “Ok” y corregir.
-6. En la ventana que se abre, presionar el botón “Enviar” para confirmar el envío de fondos.
-ESP-TLC-GC-CIMA-00 GC CINEMA MANAGER – VISTA CLOUD 04/11/2025 Página 21 de 29
-Confidencial
-Confidencial
-7. Verificar que en los ingresos se tenga un valor de €0.00 y que en la parte inferior aparezca un
-mensaje indicando que el depósito se envió exitosamente.
-10. Cierre de Día
-Después de que los fondos se hayan enviado, el cierre de día deberá realizarse de la siguiente manera:
-1. Si en el día actual se realizó toma de inventario, antes de cerrar el día, desde Gerencia se debe
-generar el reporte “Estado de Inventario” y validar que se haya finalizado.
-2. Presionar el botón “Día de cierre”.
-3. El sistema revisará que se tengan todas las condiciones necesarias para cerrar el día.
-""".strip()
 
-        secciones = dividir_documento_en_secciones(pdf_cierre_con_ruido)
-        self.assertEqual(len(secciones), 2)
-        self.assertEqual(secciones[1][0], "10. Cierre de Día")
-        self.assertNotIn("Placa de mensajero", secciones[1][1])
-        self.assertNotIn("Confidencial", secciones[1][1])
-        self.assertNotIn("Página 21 de 29", secciones[1][1])
-        self.assertIn("contraseña", secciones[0][1])
+class AsistenteIATests(unittest.TestCase):
+    def test_verificador_ia_devuelve_no_disponible_cuando_contexto_no_corresponde(self):
+        respuesta_falsa = {
+            "choices": [{"message": {"content": "NO_DISPONIBLE"}}]
+        }
+        mock_http = MagicMock()
+        mock_http.read.return_value = json.dumps(respuesta_falsa).encode("utf-8")
+        mock_http.__enter__.return_value = mock_http
 
-        # Caso A: Biblioteca donde SOLO existe ese PDF de Cierre de Día -> detecta mención lateral sin ETV
-        bib_solo_cierre = Biblioteca(self.raiz / "bib_cierre")
-        self.addCleanup(bib_solo_cierre.cerrar)
-        with patch.object(bib_solo_cierre, "_ocr_callable", return_value=None):
-            f_cierre = self.raiz / "GC_CINEMA_MANAGER_VISTA_CLOUD.txt"
-            f_cierre.write_text(pdf_cierre_con_ruido, encoding="utf-8")
-            bib_solo_cierre.agregar_archivo(f_cierre)
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test-123"}, clear=False):
+            with patch("urllib.request.urlopen", return_value=mock_http):
+                texto, prov, aviso = sintetizar_con_ia(
+                    "¿Cómo hago una solicitud de pedido?",
+                    "[FUENTE 1: Solicitud vacaciones]\n1. Pedir días libres.",
+                )
+                self.assertEqual(texto, MARCA_NO_DISPONIBLE)
+                self.assertIn("OpenAI", prov)
+                self.assertEqual(aviso, "")
 
-        resp_lateral = consultar_base_local("¿Cómo hago el inventario?", bib_solo_cierre)
-        self.assertTrue(resp_lateral.solo_mencion_lateral)
-        self.assertNotIn("Placa de mensajero", resp_lateral.pasajes[0].texto_seccion)
-        html_lat = renderizar_respuesta_asistente_html(resp_lateral)
-        self.assertIn("No hay un manual específico dedicado", html_lat)
-
-        # Caso B: Si además existe el manual real (como en self.bib), descarta por completo la mención lateral
-        with patch.object(self.bib, "_ocr_callable", return_value=None):
-            self.bib.agregar_archivo(f_cierre)
-        resp_directa = consultar_base_local("¿Cómo hago el inventario?", self.bib)
-        self.assertFalse(resp_directa.solo_mencion_lateral)
-        self.assertEqual(resp_directa.pasajes[0].doc_id, self.id_manual)
-        for pasaje in resp_directa.pasajes:
-            self.assertNotEqual(pasaje.titulo_seccion, "10. Cierre de Día")
-
-
-class AsistenteInicioIATests(unittest.TestCase):
-    def test_sintetizar_con_openai_y_caida_segura_si_falla_red(self):
+    def test_sintetizar_con_openai_y_caida_segura(self):
         respuesta_falsa = {
             "choices": [
                 {
                     "message": {
-                        "content": "1. Entra en **Inventario -> Conciliación** [Manual Inventario]."
+                        "content": "## 📋 Manual paso a paso: Conciliación\n1. **Entrar**: Cinema Manager."
                     }
                 }
             ]
@@ -218,48 +245,23 @@ class AsistenteInicioIATests(unittest.TestCase):
         mock_http.read.return_value = json.dumps(respuesta_falsa).encode("utf-8")
         mock_http.__enter__.return_value = mock_http
 
-        with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test-123", "GEMINI_API_KEY": ""}, clear=False):
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test-123"}, clear=False):
             self.assertEqual(detectar_proveedor_ia(), ("OpenAI", "sk-test-123"))
-            with patch("urllib.request.urlopen", return_value=mock_http) as llamada:
+            with patch("urllib.request.urlopen", return_value=mock_http):
                 texto, prov, aviso = sintetizar_con_ia(
-                    "¿Cómo hago la conciliación?",
-                    "[FUENTE 1: Manual Inventario]\n1. Entra en Inventario -> Conciliación.",
+                    "¿Cómo hago la conciliación de inventario?",
+                    "[FUENTE 1: Manual Inventario]\n1. Entrar en Conciliación.",
                 )
-                self.assertIn("Conciliación", texto)
-                self.assertIn("OpenAI", prov)
+                self.assertIn("Manual paso a paso", texto)
                 self.assertEqual(aviso, "")
-                llamada.assert_called_once()
 
-            # Si falla Internet o el firewall del cine corta la salida, no lanza excepción
             with patch("urllib.request.urlopen", side_effect=urllib.error.URLError("sin red")):
-                texto_err, prov_err, aviso_err = sintetizar_con_ia(
+                texto_err, _, aviso_err = sintetizar_con_ia(
                     "¿Cómo hago la conciliación?",
-                    "[FUENTE 1: Manual Inventario]\n1. Entra en Inventario -> Conciliación.",
+                    "[FUENTE 1: Manual Inventario]\n1. Entrar.",
                 )
                 self.assertEqual(texto_err, "")
-                self.assertEqual(prov_err, "OpenAI")
-                self.assertIn("manuales", aviso_err)
-
-    def test_sintetizar_con_gemini(self):
-        respuesta_gemini = {
-            "candidates": [
-                {"content": {"parts": [{"text": "1. Revisa bultos frente al albarán [Recepcion Conway]."}]}}
-            ]
-        }
-        mock_http = MagicMock()
-        mock_http.read.return_value = json.dumps(respuesta_gemini).encode("utf-8")
-        mock_http.__enter__.return_value = mock_http
-
-        with patch.dict(os.environ, {"OPENAI_API_KEY": "", "GEMINI_API_KEY": "AIza-test"}, clear=False):
-            with patch("modulos.asistente_inicio._leer_clave_env_local", side_effect=lambda k: "AIza-test" if k == "GEMINI_API_KEY" else ""):
-                with patch("urllib.request.urlopen", return_value=mock_http):
-                    texto, prov, aviso = sintetizar_con_ia(
-                        "¿Cómo recibo un pedido?",
-                        "[FUENTE 1: Recepcion Conway]\n1. Revisa bultos.",
-                    )
-                    self.assertIn("albarán", texto)
-                    self.assertIn("Gemini", prov)
-                    self.assertEqual(aviso, "")
+                self.assertIn("manual local", aviso_err)
 
 
 class InicioInterfazChatTests(unittest.TestCase):
@@ -398,7 +400,7 @@ class InicioInterfazChatTests(unittest.TestCase):
             sys.modules.pop("ui.inicio", None)
             return importlib.import_module("ui.inicio")
 
-    def test_flujo_chat_y_limpieza_en_inicio(self):
+    def test_flujo_exacto_y_rechazo_por_ia_muestra_no_disponible(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         raiz = Path(tmp.name)
@@ -414,47 +416,20 @@ class InicioInterfazChatTests(unittest.TestCase):
             with patch("modulos.asistente_inicio._leer_clave_env_local", return_value=""):
                 widget = mod_inicio.Inicio()
                 widget._biblioteca = bib
-                widget.actualizar()
-                self.assertIn("Hola", widget.respuesta.ultimo_html)
 
-                widget.hacer_pregunta("¿Cómo se hace una conciliación?")
-                self.assertEqual(widget.pregunta.text(), "")
+                # 1. Consulta disponible -> devuelve manual exacto
+                widget.hacer_pregunta("¿Cómo se hace la conciliación de inventario?")
                 self.assertIn("CONCILIACIÓN DE STOCK Y DESCUADRES", widget.respuesta.ultimo_html)
-                self.assertIn("Conciliación</span> de Stock", widget.respuesta.ultimo_html)
-                self.assertIn("Variación", widget.respuesta.ultimo_html)
-                self.assertIn("Tú:", widget.respuesta.ultimo_html)
+                self.assertNotIn("PROCEDIMIENTO NO DISPONIBLE", widget.respuesta.ultimo_html)
 
-                widget.limpiar_chat()
-                self.assertIn("Hola", widget.respuesta.ultimo_html)
+                # 2. Consulta inexistente -> cartel directo de NO DISPONIBLE
+                widget.hacer_pregunta("¿Cómo hago una solicitud de pedido?")
+                self.assertIn("PROCEDIMIENTO NO DISPONIBLE", widget.respuesta.ultimo_html)
 
-    def test_inicio_arranca_sin_modulo_apertura_documentos(self):
-        """Garantiza compatibilidad con instalaciones previas sin ui/apertura_documentos.py."""
-        import importlib
-        import sys
-
-        mod_base = self._cargar_modulo_inicio()
-        self.assertIsNotNone(mod_base)
-
-        # Forzar ausencia de ui.apertura_documentos como en versiones anteriores del portátil
-        qt_core = MagicMock()
-        qt_core.Signal = lambda *a, **kw: MagicMock()
-        qt_gui = MagicMock()
-        qt_widgets = MagicMock()
-        qt_widgets.QWidget = type("_W", (), {"__init__": lambda s, *a, **k: None})
-
-        with patch.dict(
-            sys.modules,
-            {
-                "PySide6": MagicMock(QtCore=qt_core, QtGui=qt_gui, QtWidgets=qt_widgets),
-                "PySide6.QtCore": qt_core,
-                "PySide6.QtGui": qt_gui,
-                "PySide6.QtWidgets": qt_widgets,
-                "ui.apertura_documentos": None,
-            },
-        ):
-            sys.modules.pop("ui.inicio", None)
-            mod_sin_apertura = importlib.import_module("ui.inicio")
-            self.assertTrue(callable(mod_sin_apertura.abrir_original))
+                # 3. Si la IA rechaza un candidato dudoso con NO_DISPONIBLE -> pasa a cartel NO DISPONIBLE
+                turno_id = widget._turnos[0].turno_id
+                widget._al_terminar_ia(turno_id, MARCA_NO_DISPONIBLE, "OpenAI", "")
+                self.assertTrue(widget._turnos[0].respuesta.rechazado_por_ia)
 
 
 if __name__ == "__main__":

@@ -1,20 +1,24 @@
 """
-Motor del Asistente Híbrido de Inicio para CineStock (sin dependencias de Qt).
+Motor de Alta Precisión del Asistente de Inicio para CineStock (sin dependencias de Qt).
 
-Cómo funciona:
-  1) Analiza la pregunta en lenguaje natural (con memoria de seguimiento en el
-     chat y sinónimos operativos de cine: inventario, stock, conteo,
-     conciliación, mermas, albarán, ERP, matinales…).
-  2) Busca primero en procedimientos confirmados (conocimiento.json) evitando
-     falsos positivos por verbos genéricos.
-  3) Limpia el texto extraído de PDFs/Word corporativos (quita marcas de agua
-     "Confidencial", cabeceras repetidas "ESP-... Página X de Y", cortes de
-     línea a mitad de frase y espacios rotos en eñes/tildes), divide cada
-     manual por epígrafes reales ("10. Cierre de Día", diapositivas, apartados)
-     y distingue entre un apartado dedicado al tema y una simple mención de pasada.
-  4) Si hay OPENAI_API_KEY o GEMINI_API_KEY activa, genera una guía tipo manual
-     paso a paso filtrando cualquier ruido ajeno y avisando con honestidad si
-     el manual específico aún no está subido a 📚 Conocimiento.
+Filosofía ("Manual exacto o No disponible"):
+  - El usuario busca MANUALES OPERATIVOS PASO A PASO para ejecutar procesos
+    concretos del cine, NO menciones sueltas, correos informativos ni procesos
+    parecidos que compartan una palabra ("solicitud de vacaciones" != "solicitud
+    de pedido"; "conciliación bancaria/laboral" != "conciliación de inventario";
+    "10. Cierre de Día" != "cómo hacer el inventario").
+  - Etapa 1 (Local estricta):
+      * Agrupa la pregunta en conceptos obligatorios con equivalentes estrictos.
+        TODOS los conceptos de la consulta (100 % hasta 3 conceptos) deben estar
+        presentes en el apartado.
+      * Exige evidencia real de MANUAL / PROCEDIMIENTO (pasos numerados, viñetas
+        operativas o secuencia clara de instrucciones) y autoridad temática en el
+        título/epígrafe (descarta menciones laterales en otros procesos).
+  - Etapa 2 (Verificador + Redactor IA con OpenAI / Gemini):
+      * Verifica semánticamente que el fragmento explique de verdad cómo hacer
+        EXACTAMENTE el proceso preguntado. Si no lo explica, devuelve
+        NO_DISPONIBLE y se muestra el cartel limpio de "No disponible".
+      * Si sí lo explica, redacta una guía tipo manual paso a paso limpia.
 """
 
 from __future__ import annotations
@@ -31,54 +35,64 @@ import urllib.request
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 from .conocimiento import cargar_conocimiento
 
 
 # ======================================================================
-# Normalización, raíces y sinónimos operativos de cine
+# 1) Normalización y Conceptos Estrictos (cero sinónimos laxos)
 # ======================================================================
 
 PALABRAS_GENERICAS_PREGUNTA = frozenset("""
 a al algo algun alguna algunas alguno algunos ante ayer bien buenas buenos
 cada casi cine cines cinestock como con conmigo conocer consulta consultar
-contesta contestar correo correos cosa cosas cual cuales cuando darme de
-debe debemos deberia debo decir decirme del desde despues dime donde duda
-dudas ejemplo el ella ellas ellos en entonces entre era es esa esas ese
-eso esos esta estaba estan estas este esto estos explicar explicame explica
-favor forma formas funciona funcionar gracias gustaria haber habia hace
-hacemos hacen hacer haces hacia hago han hasta hay hecho hola igual indica
-indicarme info informacion las le les lo los manera maneras manual manuales
-mas me mi mientras mis modo mostrar muestra muy necesito nos nosotros nueva
-nuevo o otra otras otro otros para paso pasos pero pide pedir poco podemos
-podria por porque pregunta preguntar proceso procesos procedimiento
-procedimientos puede pueden puedo que quien quienes quiero saber sale salen
-se segun ser si siempre sin sobre solo su sus tal tales tambien te tenemos
-tengo tiene tienen toda todas todo todos tras tu tus un una unas uno unos
-usar uso va vamos van ver vez veces viendo visto ya yo
+contesta contestar correo correos cosa cosas crear creamos creo crea cual
+cuales cuando darme de debe debemos deberia debo decir decirme del desde
+despues dime donde duda dudas ejemplo el ella ellas ellos en entonces entre
+era es esa esas ese eso esos esta estaba estan estas este esto estos
+explicar explicame explica favor forma formas funciona funcionar gestionar
+gestiono gestionamos grabar grabo gracias gustaria haber habia hace hacemos
+hacer haces hacia hago han hasta hay hecho hola igual indica indicarme info
+informacion las le les lo los manera maneras manual manuales mas me meter
+metemos meto mi mientras mis modo mostrar muestra muy necesito nos nosotros
+nueva nuevo o otra otras otro otros para paso pasos pero pide pedir poco
+podemos podria por porque pregunta preguntar proceso procesos procedimiento
+procedimientos puede pueden puedo que quien quienes quiero realizar realizo
+realizamos registrar registramos registro registra saber sacar sacamos saco
+sale salen se segun ser si siempre sin sobre solo su sus tal tales tambien
+te tenemos tengo tiene tienen toda todas todo todos tramitar tramito
+tramitamos tras tu tus un una unas uno unos usar uso va vamos van ver vez
+veces viendo visto ya yo
 """.split())
 
 PALABRAS_SEGUIMIENTO = frozenset("""
 advertencia advertencias atencion comprobar comprobacion comprobaciones
-cuidado despues detalle detalles diferencia diferencias ejemplo error
-falla fallo importante nota notas ojo pasa precaucion problema revisar
-revision siguiente siguientes verificar
+cuidado despues detalle detalles ejemplo error falla fallo importante nota
+notas ojo pasa precaucion problema revisar revision siguiente siguientes
+verificar
 """.split())
 
-GRUPOS_SINONIMOS: Tuple[Tuple[str, ...], ...] = (
-    ("inventario", "conteo", "recuento", "stock", "existencia", "toma fisica"),
-    ("conciliacion", "conciliar", "cuadre", "cuadrar", "regularizacion", "descuadre", "variacion"),
-    ("merma", "baja", "caducidad", "caducado", "rotura", "desperdicio"),
-    ("recepcion", "recepcionar", "albaran", "entrega", "mercancia"),
-    ("pedido", "solicitud", "erp", "peoplesoft", "orden"),
-    ("devolucion", "abono", "incidencia", "reclamacion"),
-    ("traspaso", "traspasar", "transferencia", "prestamo"),
-    ("matinal", "colegio", "escolar", "instituto", "grupo"),
-    ("programacion", "sala", "horario", "pase", "sesion", "cinema manager"),
-    ("taquilla", "entrada", "vista", "reembolso"),
-    ("cierre", "apertura", "arqueo", "caja", "recaudacion", "etv", "deposito"),
-    ("horno", "merrychef", "cocina", "temperatura", "limpieza"),
+# Sustantivos "genéricos/calificables" que por sí solos son ambiguos si el usuario
+# especificó un complemento ("solicitud DE pedido", "conciliación DE inventario").
+SUSTANTIVOS_CALIFICABLES = frozenset({
+    "solicitud", "conciliacion", "cierre", "apertura", "cambio", "alta",
+    "baja", "registro", "control", "gestion", "envio", "informe", "estado",
+    "proceso", "parte", "hoja", "ficha", "consulta", "autorizacion",
+})
+
+# Equivalencias ESTRICTAS: solo términos que significan exactamente lo mismo en el cine.
+# NUNCA mezclar aquí "solicitud" con "pedido", ni "conciliación" con "diferencia".
+CLASES_EQUIVALENCIA: Tuple[Tuple[str, ...], ...] = (
+    ("inventario", "inventariar", "stock", "conteo", "recuento"),
+    ("conciliacion", "conciliar"),
+    ("merma", "baja", "desperdicio"),
+    ("albaran", "recepcion", "recepcionar"),
+    ("erp", "peoplesoft"),
+    ("solicitud", "requisicion"),
+    ("pedido", "aprovisionamiento"),
+    ("devolucion", "devolver", "abono"),
+    ("matinal", "colegio", "escolar"),
 )
 
 
@@ -125,10 +139,27 @@ def _raiz_busqueda(termino: str) -> str:
     return t
 
 
+def _equivalentes_de(termino: str) -> Tuple[str, ...]:
+    """Devuelve las variantes estrictamente equivalentes a un término."""
+    t = _simplificar_termino(termino)
+    raiz_t = _raiz_busqueda(t)
+    for clase in CLASES_EQUIVALENCIA:
+        clase_norm = tuple(_simplificar_termino(x) for x in clase)
+        if t in clase_norm or any(_raiz_busqueda(x) == raiz_t for x in clase_norm):
+            return clase_norm
+    return (t,)
+
+
 def extraer_terminos_consulta(
     pregunta: str,
     historial_preguntas: Optional[Sequence[str]] = None,
-) -> Tuple[List[str], List[str]]:
+) -> Tuple[List[str], List[Tuple[str, ...]]]:
+    """
+    Devuelve:
+      - terminos_principales: lista de palabras clave limpias de la pregunta.
+      - ranuras_concepto: lista de tuplas de equivalentes estrictos; CADA tupla
+        representa un concepto obligatorio distinto de la consulta.
+    """
     tokens = [
         _simplificar_termino(t)
         for t in re.findall(r"[a-zA-Z0-9áéíóúüñÁÉÍÓÚÜÑ]+", pregunta or "")
@@ -144,12 +175,12 @@ def extraer_terminos_consulta(
 
     texto_norm = normalizar(pregunta or "").strip(" ¿?¡!.,;:")
     es_continuacion = bool(
-        re.match(r"^(y\b|pero\b|entonces\b|ademas\b|tambien\b|o\b|que hay que\b)", texto_norm)
+        re.match(r"^(y\b|pero\b|entonces\b|ademas\b|tambien\b|que hay que\b)", texto_norm)
     )
     solo_seguimiento = principales and all(p in PALABRAS_SEGUIMIENTO for p in principales)
 
     if historial_preguntas and (
-        not principales or solo_seguimiento or (es_continuacion and len(principales) <= 2)
+        not principales or solo_seguimiento or (es_continuacion and len(principales) <= 1)
     ):
         for anterior in reversed(historial_preguntas):
             prev_principales, _ = extraer_terminos_consulta(anterior, None)
@@ -160,30 +191,19 @@ def extraer_terminos_consulta(
                         principales.append(p)
                 break
 
-    if not principales:
-        for t in tokens:
-            if len(t) >= 4 and t not in principales:
-                principales.append(t)
+    # Agrupar en ranuras de concepto obligatorias (para que "mermas o bajas" sea 1 ranura,
+    # pero "conciliación de inventario" o "solicitud de pedido" sean 2 ranuras obligatorias).
+    ranuras: List[Tuple[str, ...]] = []
+    clases_vistas: Set[Tuple[str, ...]] = set()
+    for p in principales:
+        if p in PALABRAS_SEGUIMIENTO:
+            continue
+        eq = _equivalentes_de(p)
+        if eq not in clases_vistas:
+            clases_vistas.add(eq)
+            ranuras.append(eq)
 
-    sinonimos: List[str] = []
-    raices_principales = {_raiz_busqueda(p) for p in principales}
-    for grupo in GRUPOS_SINONIMOS:
-        grupo_norm = [_simplificar_termino(x) for x in grupo]
-        coincide = any(
-            p in grupo_norm or any(_raiz_busqueda(g) == _raiz_busqueda(p) for g in grupo_norm)
-            for p in principales
-        )
-        if coincide:
-            for candidato in grupo_norm:
-                for sub in candidato.split():
-                    if (
-                        len(sub) >= 3
-                        and _raiz_busqueda(sub) not in raices_principales
-                        and sub not in sinonimos
-                    ):
-                        sinonimos.append(sub)
-
-    return principales, sinonimos
+    return principales, ranuras
 
 
 # ======================================================================
@@ -217,7 +237,6 @@ class PasajeManual:
     titulo_seccion: str
     texto_seccion: str
     puntuacion: float
-    es_mencion_lateral: bool = False
 
 
 @dataclass
@@ -229,25 +248,20 @@ class RespuestaAsistente:
     texto_ia: str = ""
     proveedor_ia: str = ""
     aviso_ia: str = ""
+    rechazado_por_ia: bool = False
     biblioteca_vacia: bool = False
     total_documentos: int = 0
     error_biblioteca: Optional[str] = None
 
     @property
     def tiene_contenido(self) -> bool:
+        if self.rechazado_por_ia:
+            return False
         return self.procedimiento is not None or bool(self.pasajes)
-
-    @property
-    def solo_mencion_lateral(self) -> bool:
-        return (
-            self.procedimiento is None
-            and bool(self.pasajes)
-            and all(p.es_mencion_lateral for p in self.pasajes)
-        )
 
 
 # ======================================================================
-# 1) Búsqueda precisa en procedimientos confirmados (conocimiento.json)
+# 2) Búsqueda estricta en procedimientos confirmados (conocimiento.json)
 # ======================================================================
 
 def _cargar_lista_procedimientos() -> List[Dict]:
@@ -268,10 +282,22 @@ def _cargar_lista_procedimientos() -> List[Dict]:
     return []
 
 
+def _ranura_coincide_en(ranura: Sequence[str], texto_norm: str) -> bool:
+    for variante in ranura:
+        raiz = re.escape(_raiz_busqueda(variante))
+        if re.search(r"(?<!\w)" + raiz, texto_norm):
+            return True
+    return False
+
+
 def buscar_procedimiento_confirmado(
     pregunta: str,
     terminos_principales: Optional[Sequence[str]] = None,
 ) -> Optional[ProcedimientoCoincidente]:
+    """
+    Solo devuelve un procedimiento confirmado si cubre TODOS los conceptos clave
+    de la consulta (o coincide directamente con una de sus preguntas clave).
+    """
     if not pregunta or not pregunta.strip():
         return None
 
@@ -282,14 +308,7 @@ def buscar_procedimiento_confirmado(
     limpia = re.sub(r"[¿?¡!.,;:]", " ", normalizar(pregunta))
     limpia = re.sub(r"\s+", " ", limpia).strip()
 
-    if terminos_principales is None:
-        terminos_principales, _ = extraer_terminos_consulta(pregunta)
-
-    verbos_ambiguos = {"cambio", "cambiar", "mover", "muevo", "gestion", "gestionar", "tramitar"}
-    terminos_fuertes = [
-        t for t in terminos_principales
-        if t not in verbos_ambiguos and t not in PALABRAS_SEGUIMIENTO
-    ]
+    _, ranuras = extraer_terminos_consulta(pregunta)
 
     mejor_proc: Optional[Dict] = None
     mejor_pts = 0.0
@@ -301,9 +320,11 @@ def buscar_procedimiento_confirmado(
             for pk in proc.get("preguntas_clave", [])
         ]
 
+        coincidencia_exacta_pk = False
         for pk in preguntas_clave:
-            if pk and (pk in limpia or (len(limpia) >= 12 and limpia in pk)):
-                pts += 25.0
+            if pk and (pk == limpia or (len(pk) >= 14 and pk in limpia)):
+                pts += 40.0
+                coincidencia_exacta_pk = True
                 break
 
         cabecera_norm = normalizar(" ".join([
@@ -312,7 +333,7 @@ def buscar_procedimiento_confirmado(
             proc.get("sistema", ""),
             " ".join(proc.get("preguntas_clave", [])),
         ]))
-        cuerpo_norm = normalizar(" ".join([
+        todo_norm = cabecera_norm + " " + normalizar(" ".join([
             proc.get("objetivo", ""),
             proc.get("respuesta", ""),
             " ".join(proc.get("pasos", [])),
@@ -320,30 +341,31 @@ def buscar_procedimiento_confirmado(
             " ".join(proc.get("advertencias", [])),
         ]))
 
-        aciertos_fuertes_cabecera = 0
-        aciertos_totales = 0
-
-        for t in terminos_principales:
-            raiz = re.escape(_raiz_busqueda(t))
-            patron = re.compile(r"(?<!\w)" + raiz)
-            en_cab = bool(patron.search(cabecera_norm))
-            en_cuerpo = bool(patron.search(cuerpo_norm))
-            if en_cab or en_cuerpo:
-                aciertos_totales += 1
-                pts += 8.0 if en_cab else 3.0
-                if t in terminos_fuertes and en_cab:
-                    aciertos_fuertes_cabecera += 1
-                    pts += 5.0
-
-        if pts < 25.0:
-            if terminos_fuertes and aciertos_fuertes_cabecera == 0 and aciertos_totales < 2:
+        if not coincidencia_exacta_pk:
+            if not ranuras:
                 continue
-            if not terminos_fuertes and aciertos_totales < 2:
-                continue
-            if len(terminos_fuertes) >= 2 and aciertos_totales / len(terminos_principales) < 0.5:
+            # Exigir el 100 % de las ranuras de concepto (hasta 3 conceptos)
+            min_ranuras = len(ranuras) if len(ranuras) <= 3 else len(ranuras) - 1
+            ranuras_en_todo = sum(1 for r in ranuras if _ranura_coincide_en(r, todo_norm))
+            ranuras_en_cab = sum(1 for r in ranuras if _ranura_coincide_en(r, cabecera_norm))
+
+            if ranuras_en_todo < min_ranuras or ranuras_en_cab == 0:
                 continue
 
-        if pts > mejor_pts and pts >= 11.0:
+            # Si hay sustantivo calificable ("cambio", "solicitud"), exigir que el
+            # concepto específico (ej. "pelicula"/"sala") esté en la cabecera
+            especificas = [
+                r for r in ranuras
+                if not any(v in SUSTANTIVOS_CALIFICABLES for v in r)
+            ]
+            if especificas and not all(_ranura_coincide_en(r, todo_norm) for r in especificas):
+                continue
+            if especificas and not any(_ranura_coincide_en(r, cabecera_norm) for r in especificas):
+                continue
+
+            pts += ranuras_en_cab * 14.0 + ranuras_en_todo * 6.0
+
+        if pts > mejor_pts and pts >= 18.0:
             mejor_pts = pts
             mejor_proc = proc
 
@@ -367,18 +389,21 @@ def buscar_procedimiento_confirmado(
 
 
 # ======================================================================
-# 2) Limpieza de PDFs corporativos y división precisa en secciones
+# 3) Limpieza de PDFs corporativos y división en secciones reales
 # ======================================================================
 
 _RX_DIAPOSITIVA = re.compile(r"^---\s*Diapositiva\s+(\d+)\s*---\s*$", re.IGNORECASE)
 _RX_ADJUNTO = re.compile(r"^\[(Adjunto|Archivo|Imagen):\s*([^\]]+)\]\s*$", re.IGNORECASE)
 _RX_ENCABEZADO_MD = re.compile(r"^(#{1,4})\s+(.+)$")
-_RX_PASO_LISTA = re.compile(
-    r"^\s*(?:[-•*▪▸]|\d{1,2}[.)]\s+|paso\s+\d+\b|nota\s*:|importante\s*:|atenci[oó]n\s*:)",
+_RX_PASO_ESTRICTO = re.compile(
+    r"^\s*(?:[-•*▪▸]\s+\S|\d{1,2}[.)]\s+\S|paso\s+\d+\b)",
+    re.IGNORECASE,
+)
+_RX_PASO_O_NOTA = re.compile(
+    r"^\s*(?:[-•*▪▸]\s+\S|\d{1,2}[.)]\s+\S|paso\s+\d+\b|nota\s*:|importante\s*:|atenci[oó]n\s*:)",
     re.IGNORECASE,
 )
 
-# Ruido típico de páginas PDF corporativas (marcas de agua, cabeceras/pies de página)
 _RX_LINEA_RUIDO_PDF = re.compile(
     r"^(?:"
     r"confidencial(?:\s+uso\s+interno)?|"
@@ -390,33 +415,33 @@ _RX_LINEA_RUIDO_PDF = re.compile(
     re.IGNORECASE,
 )
 
-# Verbos/inicios que delatan una instrucción o frase de paso ("4. Presionar el botón...")
-# frente a un epígrafe de sección ("10. Cierre de Día")
 _INICIOS_FRASE_PASO = frozenset("""
 si en al el la los las un una para por con sin tras antes despues durante
-cuando una vez ingresar ingresa presionar presiona verificar verifica
-seleccionar selecciona pulsar pulsa entrar entra acceder accede hacer haz
-comprobar comprueba revisar revisa introducir introduce escribir escribe
-anotar anota imprimir imprime contar cuenta abrir abre cerrar cierra
-guardar guarda validar valida marcar marca elegir elige colocar coloca
-dar confirmar confirma esperar espera repetir repite asegurar asegurate
+cuando ingresar ingresa presionar presiona verificar verifica seleccionar
+selecciona pulsar pulsa entrar entra acceder accede hacer haz comprobar
+comprueba revisar revisa introducir introduce escribir escribe anotar anota
+imprimir imprime contar cuenta abrir abre cerrar cierra guardar guarda
+validar valida marcar marca elegir elige colocar coloca dar confirmar
+confirma esperar espera repetir repite asegurar asegurate
 """.split())
 
-MAX_CHARS_SECCION = 1400
+_RX_VERBOS_OPERATIVOS = re.compile(
+    r"\b(entrar|entra|acceder|accede|pulsar|pulsa|presionar|presiona|"
+    r"seleccionar|selecciona|ingresar|ingresa|introducir|introduce|"
+    r"guardar|guarda|comprobar|comprueba|revisar|revisa|verificar|verifica|"
+    r"imprimir|imprime|contar|cuenta|validar|valida|hacer clic|haz clic|"
+    r"pestana|modulo|boton|desplegable|menu)\b"
+)
+
+MAX_CHARS_SECCION = 1450
 MIN_CHARS_FUSION = 90
 
 
 def limpiar_texto_manual(texto: str) -> str:
-    """
-    Limpia marcas de agua/pies de página de PDFs corporativos (ej. 'Confidencial',
-    'ESP-TLC-... Página 21 de 29'), repara cortes de tildes/eñes ('contrase ña')
-    y une saltos de línea artificiales a mitad de frase en PDFs.
-    """
     if not texto:
         return ""
 
     t = texto.replace("\r\n", "\n").replace("\r", "\n")
-    # Reparar espacios rotos junto a caracteres acentuados/ñ frecuentes en pypdf
     t = re.sub(r"([a-zA-ZáéíóúÁÉÍÓÚ])\s+(ñ|Ñ)([a-záéíóú])", r"\1\2\3", t)
     t = re.sub(r"\b([a-zA-Z])\s+([áéíóúÁÉÍÓÚ][a-z]{2,})", r"\1\2", t)
 
@@ -425,7 +450,6 @@ def limpiar_texto_manual(texto: str) -> str:
         s = re.sub(r"[ \t]+", " ", cruda).strip()
         if _RX_LINEA_RUIDO_PDF.match(s):
             continue
-        # Eliminar pie incrustado al final de una línea
         s = re.sub(
             r"\s+[A-Z]{2,5}-[A-Z0-9]{2,6}-[A-Z0-9\-]+\s+.+\bP[aá]gina\s+\d+\s+de\s+\d+\s*$",
             "",
@@ -434,7 +458,6 @@ def limpiar_texto_manual(texto: str) -> str:
         ).strip()
         lineas_filtradas.append(s)
 
-    # Reflujo suave: unir líneas partidas a mitad de oración por el ancho del PDF
     reflujo: List[str] = []
     for s in lineas_filtradas:
         if not s:
@@ -449,7 +472,7 @@ def limpiar_texto_manual(texto: str) -> str:
             and not _RX_DIAPOSITIVA.match(reflujo[-1])
             and not _RX_ADJUNTO.match(reflujo[-1])
             and not _RX_ENCABEZADO_MD.match(reflujo[-1])
-            and not _RX_PASO_LISTA.match(s)
+            and not _RX_PASO_O_NOTA.match(s)
             and not _parece_encabezado_aislado(reflujo[-1])
             and not _parece_encabezado_aislado(s)
             and (s[0].islower() or s[0] in "“\"'()0123456789€%")
@@ -462,18 +485,15 @@ def limpiar_texto_manual(texto: str) -> str:
 
 
 def _parece_encabezado_aislado(linea: str) -> bool:
-    """Detecta si una línea es un título de sección (incluso sin líneas en blanco en PDF/DOCX)."""
     s = linea.strip()
     if not s or len(s) > 88:
         return False
     if _RX_DIAPOSITIVA.match(s) or _RX_ADJUNTO.match(s) or _RX_ENCABEZADO_MD.match(s):
         return True
 
-    # Numeración decimal: "2.1 Conciliación de stock", "3.2.1 Toma física"
     if re.match(r"^\d{1,2}(?:\.\d{1,2})+\.?\s+[A-ZÁÉÍÓÚÜÑ]\S.*$", s) and not s.endswith("."):
         return True
 
-    # Prefijos explícitos de manual
     if re.match(
         r"^(?:apartado|secci[oó]n|bloque|cap[ií]tulo|anexo|procedimiento)\s+[A-Z0-9]+[:.\-\s]+.+$",
         s,
@@ -481,15 +501,11 @@ def _parece_encabezado_aislado(linea: str) -> bool:
     ) and not s.endswith("."):
         return True
 
-    # Epígrafe en MAYÚSCULAS ("PROCESO DE INVENTARIO SEMANAL")
     letras = [c for c in s if c.isalpha()]
     if 5 <= len(letras) <= 65 and len(s) <= 78 and not s.endswith((",", ";", ".")):
         if all(c.isupper() for c in letras):
             return True
 
-    # Epígrafe numerado corto tipo manual ("10. Cierre de Día", "4. Toma de Inventario")
-    # Se distingue de un paso ("4. Ingresar el folio...") porque NO acaba en punto/dos puntos,
-    # es breve y no arranca con verbo imperativo/infinitivo ni condicional de frase.
     m_num = re.match(r"^(\d{1,2})\.\s+([A-ZÁÉÍÓÚÜÑ][^\n]+)$", s)
     if m_num and not s.endswith((".", ":", ";", ",")):
         resto = m_num.group(2).strip()
@@ -524,10 +540,6 @@ def _extraer_titulo_encabezado(linea: str) -> Optional[str]:
 
 
 def dividir_documento_en_secciones(texto: str, titulo_doc: str = "") -> List[Tuple[str, str]]:
-    """
-    Limpia el documento y lo divide en tuplas (titulo_seccion, contenido)
-    respetando epígrafes de PDFs/Word (incluso sin líneas en blanco), diapositivas y listas.
-    """
     texto_limpio = limpiar_texto_manual(texto)
     if not texto_limpio:
         return []
@@ -551,7 +563,6 @@ def dividir_documento_en_secciones(texto: str, titulo_doc: str = "") -> List[Tup
     if "\n".join(acumulado).strip():
         secciones_brutas.append((titulo_actual, acumulado))
 
-    # Subdividir bloques largos sin cortar listas de pasos
     resultado: List[Tuple[str, str]] = []
     for tit, lns in secciones_brutas:
         bloque_texto = "\n".join(lns).strip()
@@ -559,7 +570,6 @@ def dividir_documento_en_secciones(texto: str, titulo_doc: str = "") -> List[Tup
             resultado.append((tit, bloque_texto))
             continue
 
-        # Si el PDF venía sin líneas dobles, partir por inicios de paso o líneas largas
         parrafos = [p.strip() for p in re.split(r"\n{2,}", bloque_texto) if p.strip()]
         if len(parrafos) == 1:
             parrafos = [p.strip() for p in bloque_texto.split("\n") if p.strip()]
@@ -569,8 +579,7 @@ def dividir_documento_en_secciones(texto: str, titulo_doc: str = "") -> List[Tup
         parte_num = 1
 
         for par in parrafos:
-            es_paso = bool(_RX_PASO_LISTA.match(par))
-            # Si reinicia numeración a "1." tras un bloque ya grande, abrir nueva ventana
+            es_paso = bool(_RX_PASO_O_NOTA.match(par))
             es_paso_uno = bool(re.match(r"^1[.)]\s+", par))
             corte_natural = es_paso_uno and largo_ventana >= 450
             continuar_lista = (
@@ -579,7 +588,9 @@ def dividir_documento_en_secciones(texto: str, titulo_doc: str = "") -> List[Tup
                 and not corte_natural
                 and largo_ventana + len(par) <= MAX_CHARS_SECCION + 400
             )
-            if ventana and (corte_natural or (largo_ventana + len(par) > MAX_CHARS_SECCION and not continuar_lista)):
+            if ventana and (
+                corte_natural or (largo_ventana + len(par) > MAX_CHARS_SECCION and not continuar_lista)
+            ):
                 subtitulo = f"{tit} (parte {parte_num})" if tit and parte_num > 1 else tit
                 resultado.append((subtitulo, "\n".join(ventana)))
                 parte_num += 1
@@ -617,7 +628,7 @@ def dividir_documento_en_secciones(texto: str, titulo_doc: str = "") -> List[Tup
 
 
 # ======================================================================
-# 3) Puntuación de secciones (priorizando tema principal frente a menciones)
+# 4) Filtro y Puntuación ULTRA-ESTRICTA de Manuales Operativos
 # ======================================================================
 
 def _bono_recencia(fecha_iso: str) -> float:
@@ -631,157 +642,182 @@ def _bono_recencia(fecha_iso: str) -> float:
         return 0.0
 
 
-def _puntuar_seccion(
+def _tiene_estructura_manual(texto_seccion: str, tipo_doc: str = "") -> bool:
+    """
+    Exige que el bloque sea realmente instructivo/operativo (pasos o acciones de cómo
+    hacer algo), descartando simples correos de aviso, tablas sueltas o menciones breves.
+    """
+    if tipo_doc == "xlsx":
+        # Una hoja de cálculo de planificación/números no es un manual paso a paso
+        lineas_paso_xlsx = sum(1 for ln in texto_seccion.splitlines() if _RX_PASO_ESTRICTO.match(ln))
+        return lineas_paso_xlsx >= 3
+
+    lineas = [ln.strip() for ln in texto_seccion.splitlines() if ln.strip()]
+    n_pasos = sum(1 for ln in lineas if _RX_PASO_ESTRICTO.match(ln))
+    if n_pasos >= 2:
+        return True
+
+    norm = normalizar(texto_seccion)
+    verbos = len(_RX_VERBOS_OPERATIVOS.findall(norm))
+    if n_pasos >= 1 and verbos >= 2:
+        return True
+    if verbos >= 3 and len(texto_seccion) >= 140:
+        return True
+
+    return False
+
+
+def _evaluar_seccion_estricta(
     titulo_doc: str,
     titulo_seccion: str,
     texto_seccion: str,
-    principales: Sequence[str],
-    sinonimos: Sequence[str],
+    tipo_doc: str,
+    ranuras: Sequence[Tuple[str, ...]],
     estado_doc: str = "NORMAL",
     importancia_doc: float = 0.0,
     fecha_doc: str = "",
-) -> Tuple[float, int, bool]:
+) -> float:
     """
-    Devuelve (puntuacion_total, n_terminos_principales_acertados, es_mencion_lateral).
+    Evalúa con criterio estricto si una sección es un MANUAL REAL del proceso pedido.
+    Devuelve 0.0 si falta algún concepto obligatorio, si es una mención lateral en otro
+    proceso o si carece de instrucciones paso a paso.
     """
+    if not ranuras:
+        return 0.0
+
+    # 1) Debe tener estructura real de procedimiento/manual
+    if not _tiene_estructura_manual(texto_seccion, tipo_doc):
+        return 0.0
+
     norm_tit_doc = normalizar(titulo_doc)
     norm_tit_sec = normalizar(titulo_seccion)
     norm_cuerpo = normalizar(texto_seccion)
+    norm_contexto_seccion = f"{norm_tit_sec} {norm_cuerpo}"
+    norm_completo = f"{norm_tit_doc} {norm_tit_sec} {norm_cuerpo}"
 
-    pts = 0.0
-    aciertos_principales = 0
-    aciertos_en_titulos = 0
-    lineas_con_termino = 0
-    posiciones_aciertos: List[int] = []
+    n_ranuras = len(ranuras)
+    min_ranuras = n_ranuras if n_ranuras <= 3 else n_ranuras - 1
 
+    # 2) Cobertura obligatoria de TODOS los conceptos de la pregunta:
+    #    - Todos deben estar en (título_doc + título_sección + cuerpo)
+    #    - Y al menos todos menos uno (o todos si <=2) dentro de la propia sección
+    ranuras_en_completo = 0
+    ranuras_en_seccion = 0
+    ranuras_en_titulos = 0
     lineas_norm = [normalizar(ln) for ln in texto_seccion.splitlines() if ln.strip()]
 
-    aciertos_en_seccion = 0
-    for t in principales:
-        raiz = re.escape(_raiz_busqueda(t))
-        rx = re.compile(r"(?<!\w)" + raiz)
+    # Ranuras "específicas" (ej. 'inventario' en 'conciliación de inventario',
+    # 'pedido' en 'solicitud de pedido')
+    ranuras_especificas = [
+        r for r in ranuras if not any(v in SUSTANTIVOS_CALIFICABLES for v in r)
+    ] or list(ranuras)
 
-        m_cuerpo = list(rx.finditer(norm_cuerpo))
-        en_tit_sec = bool(rx.search(norm_tit_sec))
-        en_tit_doc = bool(rx.search(norm_tit_doc))
+    pts = 0.0
 
-        if m_cuerpo or en_tit_sec:
-            aciertos_principales += 1
-            aciertos_en_seccion += 1
-            if en_tit_sec:
-                pts += 28.0
-                aciertos_en_titulos += 1
-            if en_tit_doc:
-                pts += 20.0
-                aciertos_en_titulos += 1
-            if m_cuerpo:
-                pts += 11.0 + min(len(m_cuerpo) - 1, 4) * 2.5
-                posiciones_aciertos.append(m_cuerpo[0].start())
-                lineas_con_termino = max(
-                    lineas_con_termino,
-                    sum(1 for ln in lineas_norm if rx.search(ln)),
-                )
-        elif en_tit_doc:
-            # El título del archivo coincide, pero esta diapositiva/página concreta
-            # (ej. portada) no menciona el término: no suma salvo que el cuerpo tenga sinónimos.
-            aciertos_en_titulos += 1
+    for ranura in ranuras:
+        en_sec = _ranura_coincide_en(ranura, norm_contexto_seccion)
+        en_td = _ranura_coincide_en(ranura, norm_tit_doc)
+        en_ts = _ranura_coincide_en(ranura, norm_tit_sec)
 
-    if len(posiciones_aciertos) >= 2:
-        posiciones_aciertos.sort()
-        min_dist = min(
-            posiciones_aciertos[i + 1] - posiciones_aciertos[i]
-            for i in range(len(posiciones_aciertos) - 1)
-        )
-        if min_dist <= 65:
-            pts += 10.0
-        elif min_dist <= 160:
-            pts += 5.0
+        if en_sec or en_td:
+            ranuras_en_completo += 1
+        if en_sec:
+            ranuras_en_seccion += 1
+            pts += 15.0
+        if en_ts:
+            ranuras_en_titulos += 1
+            pts += 26.0
+        elif en_td and en_sec:
+            ranuras_en_titulos += 1
+            pts += 16.0
 
-    aciertos_sin = 0
-    aciertos_sin_en_titulos = 0
-    for s in sinonimos:
-        rx_s = re.compile(r"(?<!\w)" + re.escape(_raiz_busqueda(s)))
-        en_ts = bool(rx_s.search(norm_tit_sec))
-        en_td = bool(rx_s.search(norm_tit_doc))
-        en_c = bool(rx_s.search(norm_cuerpo))
-        if en_ts or en_c:
-            aciertos_sin += 1
-            pts += 8.0 if (en_ts or en_td) else 3.5
-            if en_ts or en_td:
-                aciertos_sin_en_titulos += 1
+    if ranuras_en_completo < min_ranuras:
+        return 0.0
 
-    if aciertos_en_seccion == 0 and aciertos_sin == 0:
-        return 0.0, 0, False
+    # Para consultas de 1 o 2 conceptos ("solicitud de pedido", "conciliación de inventario"),
+    # exigimos que AMBOS conceptos estén presentes dentro de la sección (o su título + cuerpo),
+    # salvo que uno sea el título general del manual y el otro el título de la sección.
+    if n_ranuras <= 2 and ranuras_en_seccion < n_ranuras:
+        if not (ranuras_en_completo == n_ranuras and ranuras_en_titulos == n_ranuras):
+            return 0.0
 
-    # Detectar "mención lateral": la sección tiene título propio de OTRO proceso
-    # (ej. "10. Cierre de Día"), ni el título del doc ni el de la sección hablan
-    # del tema preguntado, y el término aparece solo de refilón en 1 línea/paso.
-    tiene_titulo_ajeno = bool(
-        titulo_seccion
-        and not titulo_seccion.lower().startswith(("diapositiva ", "adjunto:", "archivo:", "imagen:"))
-        and aciertos_en_titulos == 0
-        and aciertos_sin_en_titulos == 0
-    )
-    es_mencion_lateral = bool(
-        aciertos_en_titulos == 0
-        and aciertos_sin_en_titulos == 0
-        and lineas_con_termino <= 1
-        and (tiene_titulo_ajeno or len(lineas_norm) >= 3)
+    # 3) Guardia contra menciones laterales (ej. "10. Cierre de Día" mencionando "inventario" en 1 línea):
+    es_titulo_generico_contenedor = (
+        not titulo_seccion
+        or titulo_seccion.lower().startswith(("diapositiva ", "adjunto:", "archivo:", "imagen:"))
     )
 
-    if es_mencion_lateral:
-        # Penalizamos fuerte para que cualquier manual real del tema gane siempre,
-        # pero conservamos puntuación > 0 por si es la única referencia en toda la biblioteca.
-        pts *= 0.35
+    especificas_en_tit_sec = sum(1 for r in ranuras_especificas if _ranura_coincide_en(r, norm_tit_sec))
+    especificas_en_tit_doc = sum(1 for r in ranuras_especificas if _ranura_coincide_en(r, norm_tit_doc))
+
+    # Contar en cuántas líneas distintas del cuerpo aparece el tema específico
+    lineas_con_tema = 0
+    for ln in lineas_norm:
+        if any(_ranura_coincide_en(r, ln) for r in ranuras_especificas):
+            lineas_con_tema += 1
+
+    if not es_titulo_generico_contenedor:
+        # La sección tiene un epígrafe explícito (p. ej. "10. Cierre de Día" o "CONCILIACIÓN DE STOCK").
+        # Si el epígrafe NO contiene ninguno de los conceptos específicos preguntados,
+        # rechazamos salvo que el título del documento SÍ sea del tema Y el cuerpo trate el tema a fondo.
+        if especificas_en_tit_sec == 0:
+            if especificas_en_tit_doc == 0 or lineas_con_tema < 2:
+                return 0.0
     else:
-        lineas_pasos = sum(
-            1 for ln in texto_seccion.splitlines() if _RX_PASO_LISTA.match(ln)
+        # Sin epígrafe de sección (ej. diapositiva o texto corrido):
+        # si el título del documento tampoco es del tema, exigimos presencia reiterada (>=2 líneas)
+        if especificas_en_tit_doc == 0 and lineas_con_tema < 2:
+            return 0.0
+
+    # 4) Bono por proximidad cuando hay 2+ conceptos ("solicitud de pedido", "conciliación de inventario")
+    if len(ranuras) >= 2:
+        # Comprobar si ambos conceptos aparecen en la misma frase/línea o título
+        en_misma_linea = any(
+            all(_ranura_coincide_en(r, ln) for r in ranuras[:2])
+            for ln in ([norm_tit_sec, norm_tit_doc] + lineas_norm)
+            if ln
         )
-        if lineas_pasos >= 2:
-            pts += min(lineas_pasos * 1.6, 8.0)
+        if en_misma_linea:
+            pts += 18.0
+        elif especificas_en_tit_sec == 0 and especificas_en_tit_doc == 0:
+            # Dos palabras sueltas en párrafos lejanos de un documento sin título del tema -> descartar
+            return 0.0
+
+    n_pasos = sum(1 for ln in texto_seccion.splitlines() if _RX_PASO_ESTRICTO.match(ln))
+    pts += min(n_pasos * 2.0, 10.0)
 
     if estado_doc == "DESTACADO":
         pts += 5.0
-    pts += min(max(importancia_doc, 0.0) * 0.12, 4.5)
+    pts += min(max(importancia_doc, 0.0) * 0.10, 4.0)
     pts += _bono_recencia(fecha_doc)
 
-    return pts, aciertos_principales, es_mencion_lateral
+    return pts
 
 
 def buscar_pasajes_biblioteca(
     biblioteca,
     pregunta: str,
-    principales: Sequence[str],
-    sinonimos: Sequence[str],
-    max_documentos: int = 4,
+    ranuras: Sequence[Tuple[str, ...]],
+    max_documentos: int = 3,
 ) -> List[PasajeManual]:
-    """
-    Busca exhaustivamente por términos y sinónimos en Biblioteca (sin cortar en
-    los primeros 15 correos) y selecciona los apartados exactos del tema.
-    """
-    if biblioteca is None or (not principales and not sinonimos):
+    if biblioteca is None or not ranuras:
         return []
 
     candidatos_por_id: Dict[int, object] = {}
 
-    # Consultas individuales por cada término principal y cada sinónimo clave
-    # para que FTS5 nunca descarte un manual llamado "Stock" al preguntar "inventario"
-    terminos_busqueda: List[str] = []
-    if len(principales) > 1:
-        terminos_busqueda.append(" ".join(principales))
-    for p in principales:
-        if p not in terminos_busqueda:
-            terminos_busqueda.append(p)
-        raiz = _raiz_busqueda(p)
-        if len(raiz) >= 4 and raiz not in terminos_busqueda:
-            terminos_busqueda.append(raiz)
-    for s in sinonimos[:6]:
-        if s not in terminos_busqueda:
-            terminos_busqueda.append(s)
+    # Buscar candidatos por cada variante equivalente de cada concepto
+    terminos_fts: List[str] = []
+    for ranura in ranuras:
+        for variante in ranura:
+            if variante not in terminos_fts:
+                terminos_fts.append(variante)
+            raiz = _raiz_busqueda(variante)
+            if len(raiz) >= 4 and raiz not in terminos_fts:
+                terminos_fts.append(raiz)
 
-    for q in terminos_busqueda:
+    for q in terminos_fts:
         try:
-            for r in biblioteca.buscar(q, "todos", 30):
+            for r in biblioteca.buscar(q, "todos", 40):
                 if r.id not in candidatos_por_id:
                     candidatos_por_id[r.id] = r
         except Exception:
@@ -794,10 +830,7 @@ def buscar_pasajes_biblioteca(
         except Exception:
             return []
 
-    n_princ = len(principales)
-    minimo_principales = 1 if n_princ <= 2 else max(1, math.ceil(n_princ * 0.5))
-
-    mejores_por_doc: List[Tuple[float, bool, List[PasajeManual]]] = []
+    mejores_por_doc: List[Tuple[float, List[PasajeManual]]] = []
 
     for doc_id, resumen in candidatos_por_id.items():
         try:
@@ -809,6 +842,7 @@ def buscar_pasajes_biblioteca(
 
         texto_completo = (ficha.get("texto") or "").strip()
         titulo_doc = ficha.get("titulo") or getattr(resumen, "titulo", "") or "Documento"
+        tipo_doc = ficha.get("tipo") or getattr(resumen, "tipo", "texto")
         if not texto_completo:
             continue
 
@@ -816,35 +850,32 @@ def buscar_pasajes_biblioteca(
         if not secciones:
             continue
 
-        evaluadas: List[Tuple[float, int, bool, int, str, str]] = []
+        evaluadas: List[Tuple[float, int, str, str]] = []
         for idx, (tit_sec, txt_sec) in enumerate(secciones):
-            pts, n_aciertos, lateral = _puntuar_seccion(
+            pts = _evaluar_seccion_estricta(
                 titulo_doc=titulo_doc,
                 titulo_seccion=tit_sec,
                 texto_seccion=txt_sec,
-                principales=principales,
-                sinonimos=sinonimos,
+                tipo_doc=tipo_doc,
+                ranuras=ranuras,
                 estado_doc=ficha.get("estado") or "NORMAL",
                 importancia_doc=float(ficha.get("importancia") or 0.0),
                 fecha_doc=ficha.get("fecha") or "",
             )
-            if pts > 0:
-                evaluadas.append((pts, n_aciertos, lateral, idx, tit_sec, txt_sec))
+            if pts >= 22.0:
+                evaluadas.append((pts, idx, tit_sec, txt_sec))
 
         if not evaluadas:
             continue
 
         evaluadas.sort(key=lambda x: x[0], reverse=True)
-        mejor_pts, mejor_aciertos, mejor_lat, mejor_idx, mejor_tit, mejor_txt = evaluadas[0]
+        mejor_pts, mejor_idx, mejor_tit, mejor_txt = evaluadas[0]
 
-        if n_princ > 0 and mejor_aciertos < minimo_principales and mejor_pts < 16.0 and not mejor_lat:
-            continue
-
-        def _crear_pasaje(t_sec: str, c_sec: str, p_sec: float, lat: bool) -> PasajeManual:
+        def _crear_pasaje(t_sec: str, c_sec: str, p_sec: float) -> PasajeManual:
             return PasajeManual(
                 doc_id=doc_id,
                 titulo_documento=titulo_doc,
-                tipo_documento=ficha.get("tipo") or getattr(resumen, "tipo", "texto"),
+                tipo_documento=tipo_doc,
                 fecha=ficha.get("fecha") or "",
                 categoria=ficha.get("categoria") or getattr(resumen, "categoria", ""),
                 remitente=ficha.get("remitente") or "",
@@ -852,41 +883,31 @@ def buscar_pasajes_biblioteca(
                 titulo_seccion=t_sec,
                 texto_seccion=c_sec,
                 puntuacion=p_sec,
-                es_mencion_lateral=lat,
             )
 
-        seleccion_doc = [_crear_pasaje(mejor_tit, mejor_txt, mejor_pts, mejor_lat)]
+        seleccion_doc = [_crear_pasaje(mejor_tit, mejor_txt, mejor_pts)]
 
-        # Si el manual principal tiene varios apartados directos sobre el tema (ej. Conteo + Cierre de inventario),
-        # incluimos hasta 2 bloques más para que la IA construya el manual completo de principio a fin.
-        if not mejor_lat and len(evaluadas) > 1:
-            for seg_pts, seg_aciertos, seg_lat, seg_idx, seg_tit, seg_txt in evaluadas[1:3]:
-                if not seg_lat and (seg_pts >= mejor_pts * 0.60 or abs(seg_idx - mejor_idx) == 1) and seg_aciertos >= 1:
-                    seleccion_doc.append((seg_idx, _crear_pasaje(seg_tit, seg_txt, seg_pts, seg_lat)))  # type: ignore
+        # Si el mismo manual tiene una segunda parte directa de ese mismo procedimiento
+        if len(evaluadas) > 1:
+            seg_pts, seg_idx, seg_tit, seg_txt = evaluadas[1]
+            if seg_pts >= mejor_pts * 0.70 and abs(seg_idx - mejor_idx) == 1:
+                par = [(mejor_idx, seleccion_doc[0]), (seg_idx, _crear_pasaje(seg_tit, seg_txt, seg_pts))]
+                par.sort(key=lambda x: x[0])
+                seleccion_doc = [p for _, p in par]
 
-            # Ordenar por orden real en el documento si se añadieron extras
-            if len(seleccion_doc) > 1:
-                con_indices = [(mejor_idx, seleccion_doc[0])] + list(seleccion_doc[1:])  # type: ignore
-                con_indices.sort(key=lambda par: par[0])
-                seleccion_doc = [p for _, p in con_indices[:3]]
-
-        mejores_por_doc.append((mejor_pts, mejor_lat, seleccion_doc))
+        mejores_por_doc.append((mejor_pts, seleccion_doc))
 
     mejores_por_doc.sort(key=lambda item: item[0], reverse=True)
 
-    # Si existe al menos un documento que trata el tema de forma directa (no lateral),
-    # descartamos las menciones laterales de otros manuales para no meter ruido.
-    hay_directos = any(not lat for _, lat, _ in mejores_por_doc)
-    filtrados = [
-        (pts, lista)
-        for pts, lat, lista in mejores_por_doc
-        if (not hay_directos) or (not lat)
-    ]
+    # Si el documento #1 destaca claramente sobre el resto, no mezclamos manuales secundarios flojos
+    if mejores_por_doc:
+        tope = mejores_por_doc[0][0]
+        mejores_por_doc = [m for m in mejores_por_doc if m[0] >= tope * 0.68]
 
     salida: List[PasajeManual] = []
-    for pos, (_, lista_pasajes) in enumerate(filtrados[:max_documentos]):
+    for pos, (_, lista_pasajes) in enumerate(mejores_por_doc[:max_documentos]):
         if pos == 0:
-            salida.extend(lista_pasajes[:3])
+            salida.extend(lista_pasajes[:2])
         else:
             salida.append(lista_pasajes[0])
 
@@ -894,7 +915,7 @@ def buscar_pasajes_biblioteca(
 
 
 # ======================================================================
-# 4) Consulta completa local
+# 5) Consulta completa local
 # ======================================================================
 
 def consultar_base_local(
@@ -902,7 +923,7 @@ def consultar_base_local(
     biblioteca=None,
     historial_preguntas: Optional[Sequence[str]] = None,
 ) -> RespuestaAsistente:
-    terminos, sinonimos = extraer_terminos_consulta(pregunta, historial_preguntas)
+    terminos, ranuras = extraer_terminos_consulta(pregunta, historial_preguntas)
     proc = buscar_procedimiento_confirmado(pregunta, terminos)
 
     pasajes: List[PasajeManual] = []
@@ -917,7 +938,7 @@ def consultar_base_local(
             vacia = total_docs == 0
             if not vacia:
                 pasajes = buscar_pasajes_biblioteca(
-                    biblioteca, pregunta, terminos, sinonimos, max_documentos=4
+                    biblioteca, pregunta, ranuras, max_documentos=2
                 )
         except Exception as e:
             error_bib = str(e)
@@ -934,8 +955,11 @@ def consultar_base_local(
 
 
 # ======================================================================
-# 5) Síntesis tipo Manual Paso a Paso con IA (OpenAI / Gemini robusto en Windows)
+# 6) Verificador Estricto + Generador de Manual con IA (OpenAI / Gemini)
 # ======================================================================
+
+MARCA_NO_DISPONIBLE = "NO_DISPONIBLE"
+
 
 def _leer_clave_env_local(nombre: str) -> str:
     valor = (os.environ.get(nombre) or "").strip()
@@ -984,17 +1008,11 @@ def construir_contexto_rag(respuesta: RespuestaAsistente) -> str:
         bloques.append("\n".join(lineas))
 
     for i, pasaje in enumerate(respuesta.pasajes, 1):
-        tipo_coincidencia = (
-            "MENCIÓN LATERAL EN OTRO PROCESO"
-            if pasaje.es_mencion_lateral
-            else "APARTADO RELEVANTE"
-        )
         meta = " | ".join(
             x for x in (
                 pasaje.titulo_documento,
                 f"Sección: {pasaje.titulo_seccion}" if pasaje.titulo_seccion else "",
                 f"Fecha: {pasaje.fecha}" if pasaje.fecha else "",
-                tipo_coincidencia,
             ) if x
         )
         bloques.append(f"[FUENTE {i}: {meta}]\n{pasaje.texto_seccion}")
@@ -1003,33 +1021,35 @@ def construir_contexto_rag(respuesta: RespuestaAsistente) -> str:
 
 
 _PROMPT_SISTEMA_RAG = (
-    "Eres el redactor de manuales operativos internos de CineStock para el equipo del cine.\n"
-    "Tu misión es responder a la pregunta del compañero generando una GUÍA TIPO MANUAL PASO A PASO "
-    "clara, exacta y limpia, basándote ÚNICAMENTE en el CONTEXTO proporcionado.\n\n"
-    "REGLAS OBLIGATORIAS:\n"
-    "1. EXACTITUD Y LIMPIEZA: Filtra y descarta cualquier paso del contexto que pertenezca a "
-    "otro trámite distinto (por ejemplo, si preguntan por 'inventario' y en el fragmento "
-    "aparecen pasos previos de mensajería/ETV o depósitos, NO los incluyas).\n"
-    "2. SI SÍ ESTÁ EL PROCEDIMIENTO EN EL CONTEXTO, redáctalo con este formato de manual:\n"
-    "   ## 📋 Procedimiento paso a paso\n"
-    "   Breve línea indicando dónde/cuándo se hace (según el documento).\n"
-    "   1. **Acción clara**: explicación exacta del paso.\n"
-    "   2. **Siguiente acción**: explicación exacta.\n"
-    "   ## ⚠️ Comprobaciones y notas importantes\n"
-    "   - Puntos clave, validaciones o advertencias que mencione el manual.\n"
-    "   Cita al final entre corchetes el documento origen, p. ej. [Nombre del manual].\n"
-    "3. SI EN EL CONTEXTO NO ESTÁ EL MANUAL COMPLETO DEL PROCESO (solo una mención lateral, "
-    "como validar un reporte antes del cierre de día): dilo en la PRIMERA FRASE con total "
-    "claridad ('⚠️ En los documentos cargados actualmente en Conocimiento no está el manual "
-    "completo de cómo hacer [X]; únicamente aparece esta referencia relacionada: ...'), "
-    "explica brevemente ese dato real sin inventar el resto del procedimiento y sugiere "
-    "añadir el manual específico en la pestaña 📚 Conocimiento.\n"
-    "4. PROHIBIDO INVENTAR menús, botones o pasos que no figuren literalmente en el CONTEXTO."
+    "Eres un verificador y redactor de manuales operativos de máxima precisión para CineStock.\n"
+    "El usuario SOLO quiere el MANUAL PASO A PASO EXACTO del proceso que pregunta. "
+    "NO quiere información aproximada, correos generales ni procesos parecidos.\n\n"
+    "PASO 1 - VERIFICACIÓN ESTRICTA DE CORRESPONDENCIA:\n"
+    "Comprueba si el CONTEXTO explica realmente los pasos concretos para ejecutar "
+    "EXACTAMENTE el proceso por el que pregunta el usuario:\n"
+    "- Si preguntan por 'conciliación de inventario' y el texto habla de otro tipo de "
+    "conciliación (laboral, bancaria, caja) o solo menciona inventario de pasada -> NO SIRVE.\n"
+    "- Si preguntan por 'solicitud de pedido' y el texto habla de otro tipo de solicitudes "
+    "(permisos, vacaciones, matinales, tickets de soporte) -> NO SIRVE.\n"
+    "- Si el texto es solo un aviso informativo sin instrucciones operativas de cómo hacerlo -> NO SIRVE.\n"
+    "En TODOS esos casos donde el contexto NO contenga el manual real de ese proceso exacto, "
+    "responde ÚNICAMENTE con la palabra exacta:\n"
+    "NO_DISPONIBLE\n"
+    "(sin añadir ninguna otra palabra ni explicación).\n\n"
+    "PASO 2 - SI Y SOLO SI EL CONTEXTO EXPLICA REALMENTE ESE PROCESO EXACTO:\n"
+    "Redacta una ficha de manual limpia, directa y accionable usando SOLO datos del CONTEXTO "
+    "(prohibido inventar pasos, botones o rutas que no estén en el texto):\n"
+    "## 📋 Manual paso a paso: [Nombre exacto del proceso]\n"
+    "1. **Paso 1**: instrucción clara y exacta.\n"
+    "2. **Paso 2**: instrucción clara y exacta.\n"
+    "(...)\n"
+    "## ⚠️ Comprobaciones clave\n"
+    "- (Solo si el manual original menciona validaciones o notas importantes).\n"
+    "Fuente: [Título del documento]."
 )
 
 
 def _crear_contexto_ssl() -> ssl.SSLContext:
-    """Usa los certificados de certifi en Windows si están instalados para evitar fallos SSL."""
     try:
         import certifi  # type: ignore
         return ssl.create_default_context(cafile=certifi.where())
@@ -1063,19 +1083,15 @@ def _explicar_http_error(proveedor: str, err: urllib.error.HTTPError) -> str:
         detalle = ""
 
     if err.code == 401:
-        return (
-            f"La clave de {proveedor} en tu archivo .env no es válida o ha caducado (HTTP 401). "
-            "Mostrando directamente el apartado de tus manuales."
-        )
+        return f"Clave de {proveedor} no válida en .env (HTTP 401). Mostrando manual local."
     if err.code == 429:
         if "insufficient_quota" in str(detalle).lower() or "quota" in str(detalle).lower():
             return (
-                f"Tu cuenta de {proveedor} no tiene saldo/cuota disponible (HTTP 429). "
-                "Puedes recargarla o usar una clave gratuita GEMINI_API_KEY en .env. "
-                "Mostrando el apartado limpio de tus manuales."
+                f"Tu cuenta de {proveedor} no tiene saldo disponible (HTTP 429). "
+                "Mostrando manual local."
             )
-        return f"Límite temporal de peticiones en {proveedor} (HTTP 429). Mostrando tus manuales."
-    return f"{proveedor} devolvió HTTP {err.code}. Mostrando el apartado limpio de tus manuales."
+        return f"Límite temporal de {proveedor} (HTTP 429). Mostrando manual local."
+    return f"{proveedor} devolvió HTTP {err.code}. Mostrando manual local."
 
 
 def sintetizar_con_ia(
@@ -1085,8 +1101,9 @@ def sintetizar_con_ia(
     timeout: float = 18.0,
 ) -> Tuple[str, str, str]:
     """
-    Llama a OpenAI o Gemini para redactar la guía tipo manual paso a paso.
-    Devuelve (texto_generado, nombre_proveedor, aviso_si_falla).
+    Devuelve (texto_generado_o_NO_DISPONIBLE, nombre_proveedor, aviso_si_falla).
+    Si la IA dictamina que el contexto no responde exactamente al proceso pedido,
+    devuelve texto_generado == 'NO_DISPONIBLE'.
     """
     deteccion = detectar_proveedor_ia()
     if not deteccion or not contexto_rag.strip():
@@ -1097,14 +1114,14 @@ def sintetizar_con_ia(
     resumen_historial = ""
     if historial_turnos:
         ultimos = list(historial_turnos)[-2:]
-        partes_h = [f"Usuario: {q}\nAsistente: {a[:280]}" for q, a in ultimos if q]
+        partes_h = [f"Usuario: {q}\nAsistente: {a[:240]}" for q, a in ultimos if q and a]
         if partes_h:
-            resumen_historial = "CONVERSACIÓN PREVIA RECIENTE:\n" + "\n".join(partes_h) + "\n\n"
+            resumen_historial = "CONVERSACIÓN PREVIA:\n" + "\n".join(partes_h) + "\n\n"
 
     mensaje_usuario = (
         f"{resumen_historial}"
-        f"CONTEXTO EXTRAÍDO DE LA BIBLIOTECA DE CINESTOCK:\n{contexto_rag}\n\n"
-        f"PREGUNTA DEL COMPAÑERO:\n{pregunta}"
+        f"CONTEXTO DE DOCUMENTOS:\n{contexto_rag}\n\n"
+        f"PROCESO CONSULTADO POR EL USUARIO:\n{pregunta}"
     )
 
     try:
@@ -1118,7 +1135,7 @@ def sintetizar_con_ia(
                 },
                 payload={
                     "model": modelo,
-                    "temperature": 0.1,
+                    "temperature": 0.0,
                     "max_tokens": 850,
                     "messages": [
                         {"role": "system", "content": _PROMPT_SISTEMA_RAG},
@@ -1133,6 +1150,8 @@ def sintetizar_con_ia(
                 .get("content", "")
                 .strip()
             )
+            if texto.upper().startswith(MARCA_NO_DISPONIBLE):
+                return (MARCA_NO_DISPONIBLE, f"OpenAI · {modelo}", "")
             return (texto, f"OpenAI · {modelo}", "")
 
         if proveedor == "Gemini":
@@ -1150,7 +1169,7 @@ def sintetizar_con_ia(
                 payload={
                     "system_instruction": {"parts": [{"text": _PROMPT_SISTEMA_RAG}]},
                     "contents": [{"role": "user", "parts": [{"text": mensaje_usuario}]}],
-                    "generationConfig": {"temperature": 0.1, "maxOutputTokens": 900},
+                    "generationConfig": {"temperature": 0.0, "maxOutputTokens": 900},
                 },
                 timeout=timeout,
             )
@@ -1160,23 +1179,21 @@ def sintetizar_con_ia(
                 .get("parts", [])
             )
             texto = "".join(p.get("text", "") for p in partes).strip()
+            if texto.upper().startswith(MARCA_NO_DISPONIBLE):
+                return (MARCA_NO_DISPONIBLE, f"Gemini · {modelo}", "")
             return (texto, f"Gemini · {modelo}", "")
 
     except urllib.error.HTTPError as e:
         return ("", proveedor, _explicar_http_error(proveedor, e))
     except Exception as e:
-        motivo = "certificado SSL" if "SSL" in str(e).upper() else "conexión de red"
-        return (
-            "",
-            proveedor,
-            f"No se pudo conectar con {proveedor} ({motivo}); mostrando el apartado limpio de tus manuales.",
-        )
+        motivo = "certificado SSL" if "SSL" in str(e).upper() else "red"
+        return ("", proveedor, f"IA sin conexión ({motivo}); mostrando manual local.")
 
     return ("", "", "")
 
 
 # ======================================================================
-# 6) Formateo HTML limpio tipo Manual para QTextBrowser
+# 7) Formateo HTML limpio (Manual exacto o Cartel "NO DISPONIBLE")
 # ======================================================================
 
 ICONOS_DOC = {
@@ -1185,7 +1202,7 @@ ICONOS_DOC = {
     "pptx": "📊 Presentación",
     "docx": "📘 Word",
     "xlsx": "📗 Excel",
-    "texto": "📄 Documento",
+    "texto": "📄 Manual",
     "zip": "🗜 ZIP",
     "imagen": "🖼 Imagen",
 }
@@ -1301,46 +1318,57 @@ def formatear_markdown_ia_html(texto_ia: str) -> str:
     return "".join(lineas_out)
 
 
-def _etiqueta_antiguedad(fecha_iso: str) -> str:
-    if not fecha_iso or len(fecha_iso) < 4:
-        return ""
-    try:
-        anio = int(fecha_iso[:4])
-        if date.today().year - anio >= 2:
-            return (
-                ' · <span style="color:#B45309; font-weight:600;">'
-                "⚠ Documento antiguo: verifica vigencia</span>"
-            )
-    except ValueError:
-        pass
-    return ""
+def _html_cartel_no_disponible(respuesta: RespuestaAsistente) -> str:
+    """Cartel limpio y directo cuando no existe un manual exacto del proceso consultado."""
+    consulta_esc = html.escape(respuesta.pregunta.strip())
+    if respuesta.error_biblioteca:
+        sub = "La biblioteca de Conocimiento no está accesible en este momento."
+    elif respuesta.biblioteca_vacia:
+        sub = (
+            "Todavía no hay manuales cargados en <b>📚 Conocimiento</b>. "
+            "Añade el PDF, Word o presentación del proceso para habilitarlo."
+        )
+    else:
+        sub = (
+            "No hay ningún manual paso a paso cargado en <b>📚 Conocimiento</b> que explique "
+            "específicamente este proceso. Cuando añadas su manual oficial, aparecerá aquí."
+        )
+
+    return (
+        '<table width="100%" cellpadding="14" cellspacing="0" bgcolor="#FEF2F2" '
+        'style="border:2px solid #F87171; margin-bottom:6px;">'
+        "<tr><td>"
+        '<div style="font-size:14px; font-weight:bold; color:#991B1B; margin-bottom:4px;">'
+        "🚫 PROCEDIMIENTO NO DISPONIBLE"
+        "</div>"
+        f'<div style="font-size:13px; color:#7F1D1D; margin-bottom:5px;">'
+        f"Sin manual disponible para: <b>«{consulta_esc}»</b>."
+        "</div>"
+        f'<div style="font-size:12px; color:#991B1B;">{sub}</div>'
+        "</td></tr></table>"
+    )
 
 
 def renderizar_respuesta_asistente_html(
     respuesta: RespuestaAsistente,
     pensando_ia: bool = False,
 ) -> str:
-    """
-    Genera la respuesta visual:
-      - Si la IA ha generado el manual paso a paso, muestra esa guía limpia como
-        protagonista y debajo una barra compacta con los enlaces para abrir los
-        documentos originales (sin ensuciar la pantalla con texto crudo duplicado).
-      - Si está en modo local (o mientras la IA redacta), muestra los apartados
-        limpios y reestructurados, avisando si solo hay una mención lateral.
-    """
+    # Si no hay coincidencias estrictas o la IA verificó que no corresponde al proceso -> Cartel directo
+    if not respuesta.tiene_contenido:
+        return _html_cartel_no_disponible(respuesta)
+
     bloques: List[str] = []
 
     if pensando_ia:
-        bloques.append(
-            '<table width="100%" cellpadding="10" cellspacing="0" bgcolor="#F0FDFA" '
+        return (
+            '<table width="100%" cellpadding="12" cellspacing="0" bgcolor="#F0FDFA" '
             'style="border:1px solid #5EEAD4; margin-bottom:8px;">'
             '<tr><td style="color:#0F766E; font-size:13px;">'
-            "<b>🤖 Generando guía paso a paso</b> a partir de tus documentos… "
-            "<i>(unos segundos)</i>"
+            "<b>🤖 Verificando manual exacto y redactando pasos…</b>"
             "</td></tr></table>"
         )
 
-    # 1) Si la IA generó la guía tipo manual, ella es la vista principal limpia
+    # 1) Si la IA validó y redactó el manual paso a paso
     if respuesta.texto_ia:
         cuerpo_ia = formatear_markdown_ia_html(respuesta.texto_ia)
         etiqueta_prov = html.escape(respuesta.proveedor_ia or "IA")
@@ -1350,7 +1378,7 @@ def renderizar_respuesta_asistente_html(
             "<tr><td>"
             '<div style="color:#0F766E; font-size:11.5px; font-weight:bold; '
             'letter-spacing:0.3px; margin-bottom:6px;">'
-            f"🤖 GUÍA GENERADA DESDE TUS MANUALES ({etiqueta_prov})"
+            f"📘 MANUAL OPERATIVO PASO A PASO ({etiqueta_prov})"
             "</div>"
             f'<div style="color:#0F172A; font-size:13px; line-height:1.48; '
             f'background-color:#FFFFFF; padding:10px 12px; border:1px solid #E2E8F0;">'
@@ -1358,7 +1386,6 @@ def renderizar_respuesta_asistente_html(
             "</td></tr></table>"
         )
 
-        # Lista compacta de documentos originales consultados (1 clic para abrir)
         if respuesta.pasajes:
             vistos = set()
             enlaces_fuentes: List[str] = []
@@ -1368,50 +1395,39 @@ def renderizar_respuesta_asistente_html(
                 vistos.add(pasaje.doc_id)
                 icono = ICONOS_DOC.get(pasaje.tipo_documento, "📄")
                 sec = f" ({html.escape(pasaje.titulo_seccion)})" if pasaje.titulo_seccion else ""
-                fec = f" · {html.escape(pasaje.fecha)}" if pasaje.fecha else ""
                 enlaces_fuentes.append(
-                    f'<div style="margin:3px 0; font-size:12px; color:#334155;">'
-                    f'{icono}: <b>{html.escape(pasaje.titulo_documento)}</b>{sec}{fec} — '
+                    f'<div style="margin:2px 0; font-size:12px; color:#334155;">'
+                    f'{icono}: <b>{html.escape(pasaje.titulo_documento)}</b>{sec} — '
                     f'<a href="abrir:{pasaje.doc_id}" '
                     f'style="color:#1D4ED8; font-weight:bold; text-decoration:none;">'
-                    f"📂 Abrir original</a></div>"
+                    f"📂 Abrir manual original</a></div>"
                 )
             bloques.append(
                 '<table width="100%" cellpadding="8" cellspacing="0" bgcolor="#F1F5F9" '
                 'style="border:1px solid #CBD5E1; margin-bottom:6px;">'
                 "<tr><td>"
-                '<div style="font-size:11.5px; font-weight:bold; color:#475569; margin-bottom:3px;">'
-                "📚 DOCUMENTOS ORIGINALES CONSULTADOS:</div>"
                 f'{"".join(enlaces_fuentes)}'
                 "</td></tr></table>"
             )
         return "".join(bloques)
 
-    # 2) Aviso claro si la llamada a IA falló (ej. cuota agotada en OpenAI o sin red)
     if respuesta.aviso_ia:
         bloques.append(
-            '<table width="100%" cellpadding="8" cellspacing="0" bgcolor="#FFFBEB" '
+            '<table width="100%" cellpadding="7" cellspacing="0" bgcolor="#FFFBEB" '
             'style="border:1px solid #FDE68A; margin-bottom:8px;">'
-            f'<tr><td style="color:#92400E; font-size:12px;">'
-            f"⚠️ {html.escape(respuesta.aviso_ia)}</td></tr></table>"
+            f'<tr><td style="color:#92400E; font-size:11.5px;">'
+            f"ℹ️ {html.escape(respuesta.aviso_ia)}</td></tr></table>"
         )
 
-    # 3) Procedimiento confirmado oficial (conocimiento.json)
+    # 2) Procedimiento confirmado oficial (conocimiento.json)
     if respuesta.procedimiento is not None:
         p = respuesta.procedimiento
         partes_p = [
             '<div style="color:#15803D; font-size:12px; font-weight:bold; margin-bottom:4px;">'
-            "✅ PROCEDIMIENTO CONFIRMADO EN CINESTOCK</div>",
+            "✅ PROCEDIMIENTO CONFIRMADO</div>",
             f'<div style="font-size:14px; font-weight:bold; color:#0F172A; margin-bottom:4px;">'
             f"{html.escape(p.titulo)}</div>",
         ]
-        meta_p = " · ".join(
-            x for x in (p.sistema, p.categoria, f"Rev. {p.ultima_revision}" if p.ultima_revision else "") if x
-        )
-        if meta_p:
-            partes_p.append(
-                f'<div style="color:#64748B; font-size:11.5px; margin-bottom:6px;">{html.escape(meta_p)}</div>'
-            )
         if p.objetivo:
             partes_p.append(
                 f'<div style="color:#334155; margin-bottom:6px;"><i>{html.escape(p.objetivo)}</i></div>'
@@ -1444,45 +1460,26 @@ def renderizar_respuesta_asistente_html(
             f'<tr><td style="font-size:13px;">{"".join(partes_p)}</td></tr></table>'
         )
 
-    # 4) Apartados limpios extraídos de manuales/correos (modo local o respaldo)
-    if respuesta.pasajes and not pensando_ia:
-        if respuesta.solo_mencion_lateral:
-            bloques.append(
-                '<table width="100%" cellpadding="9" cellspacing="0" bgcolor="#FFFBEB" '
-                'style="border:1px solid #FCD34D; margin-bottom:8px;">'
-                '<tr><td style="color:#92400E; font-size:12.5px;">'
-                "<b>⚠️ No hay un manual específico dedicado a este proceso</b> entre los "
-                f"{respuesta.total_documentos or ''} documentos cargados actualmente en "
-                "<b>📚 Conocimiento</b>. Solo aparece mencionado de forma secundaria en:"
-                "</td></tr></table>"
-            )
-        else:
-            bloques.append(
-                '<div style="color:#1E3A8A; font-size:12px; font-weight:bold; '
-                'margin:6px 0 6px 2px;">📖 APARTADOS EXTRAÍDOS DE TUS MANUALES</div>'
-            )
-
+    # 3) Apartados de manual (solo los que han superado el filtro estricto de procedimiento)
+    if respuesta.pasajes:
         for pasaje in respuesta.pasajes:
-            icono = ICONOS_DOC.get(pasaje.tipo_documento, "📄 Documento")
+            icono = ICONOS_DOC.get(pasaje.tipo_documento, "📄 Manual")
             detalles = [icono]
             if pasaje.fecha:
                 detalles.append(f"Fecha: {html.escape(pasaje.fecha)}")
             if pasaje.categoria:
                 detalles.append(html.escape(pasaje.categoria))
-            if pasaje.estado == "DESTACADO":
-                detalles.append("⭐ Destacado")
-
-            linea_meta = " · ".join(detalles) + _etiqueta_antiguedad(pasaje.fecha)
+            linea_meta = " · ".join(detalles)
             sub_sec = (
                 f'<div style="color:#1D4ED8; font-weight:bold; font-size:12.5px; margin:4px 0;">'
-                f"📌 Sección: {html.escape(pasaje.titulo_seccion)}</div>"
+                f"📌 {html.escape(pasaje.titulo_seccion)}</div>"
                 if pasaje.titulo_seccion
                 else ""
             )
             cuerpo_html = formatear_bloque_manual_html(pasaje.texto_seccion, respuesta.terminos)
 
             bloques.append(
-                '<table width="100%" cellpadding="9" cellspacing="0" bgcolor="#F8FAFC" '
+                '<table width="100%" cellpadding="10" cellspacing="0" bgcolor="#F8FAFC" '
                 'style="border:1px solid #CBD5E1; margin-bottom:8px;">'
                 "<tr><td>"
                 f'<div style="font-size:13px; font-weight:bold; color:#0F172A;">'
@@ -1495,33 +1492,8 @@ def renderizar_respuesta_asistente_html(
                 f'<div style="margin-top:6px;">'
                 f'<a href="abrir:{pasaje.doc_id}" '
                 f'style="color:#1D4ED8; font-weight:bold; text-decoration:none; font-size:12px;">'
-                f"📂 Abrir documento original</a></div>"
+                f"📂 Abrir manual original</a></div>"
                 "</td></tr></table>"
             )
-
-    if not bloques:
-        if respuesta.error_biblioteca:
-            extra = (
-                "<br><small style='color:#64748B;'>(La biblioteca de Conocimiento no está "
-                "disponible en este momento.)</small>"
-            )
-        elif respuesta.biblioteca_vacia:
-            extra = (
-                "<br><br>Todavía no hay manuales ni correos cargados en <b>📚 Conocimiento</b>. "
-                "Entra en esa pestaña, pulsa <b>➕ Añadir correos / documentos…</b> para meter "
-                "los manuales del cine (PDF, Word, PowerPoint o correos) y generaré la guía "
-                "paso a paso desde ellos."
-            )
-        else:
-            extra = (
-                "<br><small style='color:#475569;'>Si tienes el PDF o correo de ese proceso "
-                "(por ejemplo en el Escritorio), añádelo en <b>📚 Conocimiento → ➕ Añadir "
-                "correos / documentos…</b> y vuelve a preguntarme.</small>"
-            )
-        return (
-            '<div style="color:#334155; font-size:13px;">'
-            "No he encontrado ningún procedimiento ni manual en tu biblioteca que explique "
-            f"esa consulta.{extra}</div>"
-        )
 
     return "".join(bloques)
