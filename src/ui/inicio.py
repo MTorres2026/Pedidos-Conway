@@ -40,8 +40,11 @@ from modulos.asistente_inicio import (
     construir_contexto_rag,
     consultar_base_local,
     detectar_proveedor_ia,
+    exportar_manual_ia_excel,
+    exportar_manual_ia_word,
     guardar_cache_manual_ia,
     leer_cache_manual_ia,
+    normalizar,
     renderizar_respuesta_asistente_html,
     sintetizar_con_ia,
 )
@@ -575,6 +578,7 @@ class Inicio(QWidget):
             html_resp = renderizar_respuesta_asistente_html(
                 turno.respuesta,
                 pensando_ia=turno.pensando_ia,
+                turno_id=turno.turno_id,
             )
             partes_chat.append(
                 '<table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:6px;">'
@@ -591,11 +595,48 @@ class Inicio(QWidget):
                 barra.setValue(min(pos_previa, barra.maximum()))
 
     # ------------------------------------------------------------------
-    # Apertura de documentos originales desde los enlaces del chat
+    # Apertura de documentos originales y exportación a Excel / Word
     # ------------------------------------------------------------------
+
+    def _carpeta_manuales_exportados(self) -> Path:
+        bib = self._obtener_biblioteca()
+        if bib is not None and getattr(bib, "carpeta", None):
+            return Path(bib.carpeta).parent / "manuales_ia"
+        return Path(__file__).resolve().parents[2] / "data" / "manuales_ia"
+
+    def _exportar_y_abrir_hoja(self, turno_id: int, formato: str):
+        turno_sel = next((t for t in self._turnos if t.turno_id == turno_id), None)
+        if turno_sel is None or not turno_sel.respuesta.texto_ia:
+            QMessageBox.warning(self, "Exportar manual", "No se encontró el manual generado para exportar.")
+            return
+        try:
+            slug = "_".join(normalizar(turno_sel.pregunta).split()[:6]) or "manual_operativo"
+            carpeta = self._carpeta_manuales_exportados()
+            if formato == "excel":
+                destino = carpeta / f"Manual_{slug}.xlsx"
+                exportar_manual_ia_excel(turno_sel.respuesta, destino)
+            else:
+                destino = carpeta / f"Manual_{slug}.doc"
+                exportar_manual_ia_word(turno_sel.respuesta, destino)
+
+            if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(destino.resolve()))):
+                QMessageBox.information(
+                    self,
+                    "Manual guardado",
+                    f"Manual guardado correctamente en:\n{destino.resolve()}",
+                )
+        except Exception as err:
+            QMessageBox.warning(self, "Exportar manual", f"No se pudo exportar la hoja:\n{err}")
 
     def _abrir_enlace(self, url):
         enlace = url.toString() if hasattr(url, "toString") else str(url)
+        if enlace.startswith(("excel:", "word:")):
+            esquema, valor = enlace.split(":", 1)
+            try:
+                self._exportar_y_abrir_hoja(int(valor), esquema)
+            except ValueError:
+                pass
+            return
         if not enlace.startswith("abrir:"):
             return
         try:

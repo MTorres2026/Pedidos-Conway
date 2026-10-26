@@ -5,16 +5,20 @@ import os
 import tempfile
 import unittest
 import urllib.error
+import zipfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from modulos.asistente_inicio import (
     AdjuntoIA,
     MARCA_NO_DISPONIBLE,
+    RespuestaAsistente,
     buscar_procedimiento_confirmado,
     consultar_base_local,
     detectar_proveedor_ia,
     dividir_documento_en_secciones,
+    exportar_manual_ia_excel,
+    exportar_manual_ia_word,
     extraer_terminos_consulta,
     formatear_markdown_ia_html,
     guardar_cache_manual_ia,
@@ -322,18 +326,21 @@ class AsistenteIATests(unittest.TestCase):
                 req_enviada = mock_open.call_args[0][0]
                 payload_enviado = json.loads(req_enviada.data.decode("utf-8"))
                 contenido_user = payload_enviado["messages"][1]["content"]
-                self.assertEqual(contenido_user[0]["type"], "file")
-                self.assertIn("application/pdf;base64,", contenido_user[0]["file"]["file_data"])
+                bloques_file = [b for b in contenido_user if b.get("type") == "file"]
+                self.assertEqual(len(bloques_file), 1)
+                self.assertIn("application/pdf;base64,", bloques_file[0]["file"]["file_data"])
 
                 # Verificar que el renderizador genera tarjetas en colores con PASO 1, PASO 2,
                 # botones destacados, sección importante y comprobación final
-                html_bonito = formatear_markdown_ia_html(texto, proveedor_ia=prov)
+                html_bonito = formatear_markdown_ia_html(texto, proveedor_ia=prov, turno_id=1)
                 self.assertIn("Segoe UI", html_bonito)
                 self.assertIn("PASO 1", html_bonito)
                 self.assertIn("PASO 2", html_bonito)
                 self.assertIn("Cinema Manager", html_bonito)
                 self.assertIn("Muy importante", html_bonito)
                 self.assertIn("Comprobación final", html_bonito)
+                self.assertIn('href="excel:1"', html_bonito)
+                self.assertIn('href="word:1"', html_bonito)
 
             with patch("urllib.request.urlopen", side_effect=urllib.error.URLError("sin red")):
                 texto_err, _, aviso_err = sintetizar_con_ia(
@@ -342,6 +349,152 @@ class AsistenteIATests(unittest.TestCase):
                 )
                 self.assertEqual(texto_err, "")
                 self.assertIn("IA no disponible", aviso_err)
+
+    def test_pptx_corporativo_extrae_diapositiva_menu_sin_texto_y_exporta_excel_word(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            raiz_p = Path(tmp)
+            bib_pptx = Biblioteca(raiz_p / "bib_pptx")
+            self.addCleanup(bib_pptx.cerrar)
+
+            ruta_pptx = raiz_p / "04c654d25d_170608 Conciliación de inventarios.pptx"
+            png_falso_logo = b"\x89PNG\r\n\x1a\n" + (b"L" * 11_000)
+            png_erp_login = b"\x89PNG\r\n\x1a\n" + (b"A" * 16_000)
+            png_erp_menu = b"\x89PNG\r\n\x1a\n" + (b"M" * 18_000)
+            png_erp_id = b"\x89PNG\r\n\x1a\n" + (b"E" * 17_000)
+
+            def _slide_xml(textos, con_pic_contenido=False, con_recuadro_rojo=False):
+                ns_p = 'xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"'
+                ns_a = 'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"'
+                ns_r = 'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"'
+                partes = [f'<p:sld {ns_p} {ns_a} {ns_r}><p:cSld><p:spTree>']
+                # Logo de plantilla en rId1
+                partes.append(
+                    '<p:pic><p:blipFill><a:blip r:embed="rId1"/></p:blipFill>'
+                    '<p:spPr><a:xfrm><a:off x="0" y="6000000"/><a:ext cx="1200000" cy="400000"/></a:xfrm></p:spPr></p:pic>'
+                )
+                if con_pic_contenido:
+                    partes.append(
+                        '<p:pic><p:blipFill><a:blip r:embed="rId2"/></p:blipFill>'
+                        '<p:spPr><a:xfrm><a:off x="400000" y="400000"/><a:ext cx="8000000" cy="5200000"/></a:xfrm></p:spPr></p:pic>'
+                    )
+                if con_recuadro_rojo:
+                    partes.append(
+                        '<p:sp><p:spPr><a:xfrm><a:off x="6200000" y="4100000"/><a:ext cx="2100000" cy="360000"/></a:xfrm>'
+                        '<a:ln w="28575"><a:solidFill><a:srgbClr val="FF0000"/></a:solidFill></a:ln></p:spPr></p:sp>'
+                    )
+                for idx_t, txt in enumerate(textos):
+                    partes.append(
+                        f'<p:sp><p:spPr><a:xfrm><a:off x="500000" y="{500000 + idx_t * 300000}"/>'
+                        '<a:ext cx="4000000" cy="250000"/></a:xfrm></p:spPr>'
+                        f'<p:txBody><a:p><a:r><a:t>{txt}</a:t></a:r></a:p></p:txBody></p:sp>'
+                    )
+                partes.append("</p:spTree></p:cSld></p:sld>")
+                return "".join(partes)
+
+            def _rels_xml(img_extra=None):
+                base = (
+                    '<?xml version="1.0" encoding="UTF-8"?>'
+                    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+                    '<Relationship Id="rId1" Type="img" Target="../media/logo_yelmo.png"/>'
+                )
+                if img_extra:
+                    base += f'<Relationship Id="rId2" Type="img" Target="../media/{img_extra}"/>'
+                return base + "</Relationships>"
+
+            with zipfile.ZipFile(ruta_pptx, "w") as z:
+                z.writestr(
+                    "ppt/presentation.xml",
+                    '<p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">'
+                    '<p:sldSz cx="9144000" cy="6858000"/></p:presentation>',
+                )
+                z.writestr("ppt/media/logo_yelmo.png", png_falso_logo)
+                z.writestr("ppt/media/s9_login.png", png_erp_login)
+                z.writestr("ppt/media/s11_menu.png", png_erp_menu)
+                z.writestr("ppt/media/s12_evento.png", png_erp_id)
+
+                # Diapositivas 1..3 de relleno con el logo repetido (>=4 usos -> logo descartado)
+                for n_relleno in (1, 2, 3):
+                    z.writestr(f"ppt/slides/slide{n_relleno}.xml", _slide_xml([f"Portada {n_relleno}"]))
+                    z.writestr(f"ppt/slides/_rels/slide{n_relleno}.xml.rels", _rels_xml())
+
+                # Slide 4: Login ERP
+                z.writestr("ppt/slides/slide4.xml", _slide_xml(["Introducir Usuario", "Pinchar en Conectar"], True))
+                z.writestr("ppt/slides/_rels/slide4.xml.rels", _rels_xml("s9_login.png"))
+
+                # Slide 5: Índice
+                z.writestr(
+                    "ppt/slides/slide5.xml",
+                    _slide_xml([
+                        "1. Acceso a la plataforma",
+                        "3. Creación del evento de toma de inventario",
+                        "8. Conciliación de inventario",
+                    ]),
+                )
+                z.writestr("ppt/slides/_rels/slide5.xml.rels", _rels_xml())
+
+                # Slide 6 (equivalente a Slide 11 real): CERO TEXTO, solo captura de menú + recuadro rojo
+                z.writestr("ppt/slides/slide6.xml", _slide_xml([], con_pic_contenido=True, con_recuadro_rojo=True))
+                z.writestr("ppt/slides/_rels/slide6.xml.rels", _rels_xml("s11_menu.png"))
+
+                # Slide 7 (equivalente a Slide 12 real): ID Evento Ejecución + Añadir un valor
+                z.writestr(
+                    "ppt/slides/slide7.xml",
+                    _slide_xml(
+                        [
+                            "Creación de Evento de Recuento",
+                            "Escribir un código para identificar el evento",
+                            "Pinchar en Añadir",
+                            "IMPORTANTE: La primera vez hay que añadir un valor",
+                        ],
+                        con_pic_contenido=True,
+                        con_recuadro_rojo=True,
+                    ),
+                )
+                z.writestr("ppt/slides/_rels/slide7.xml.rels", _rels_xml("s12_evento.png"))
+
+            with patch.object(bib_pptx, "_ocr_callable", return_value=None):
+                bib_pptx.agregar_archivo(ruta_pptx)
+
+            resp = consultar_base_local("conciliación de inventarios", bib_pptx)
+            self.assertTrue(resp.tiene_contenido)
+            # Deben haberse extraído exactamente las 3 diapositivas con captura real (4, 6 y 7),
+            # descartando el logo repetido en las 7 diapositivas e incluyendo la Slide 6 sin texto
+            self.assertEqual(len(resp.adjuntos_ia), 3)
+            nombres_adj = [a.nombre for a in resp.adjuntos_ia]
+            self.assertTrue(nombres_adj[0].startswith("diapositiva_04"))
+            self.assertTrue(nombres_adj[1].startswith("diapositiva_06"))
+            self.assertTrue(nombres_adj[2].startswith("diapositiva_07"))
+            self.assertIn("recuadros/flechas rojas", resp.adjuntos_ia[1].etiqueta_previa)
+
+            # Verificar renderizado tipo Hoja Excel/Word de 4 columnas y exportación real a .xlsx y .doc
+            resp.texto_ia = (
+                "# Manual Operativo: Conciliación y Toma de Inventario\n"
+                "SISTEMA: ERP Global (PeopleSoft)\n"
+                "OBJETIVO: Crear el evento de inventario y conciliar existencias.\n\n"
+                "## FASE 1: Acceso y Creación del Evento\n"
+                "PASO 1 | Acceso a ERP | Entrar en [ERP Global], poner [Usuario] y pulsar [Conectar]. | Credenciales cine\n"
+                "PASO 2 | Ruta de Menú | Ir a [Menú Principal] -> [Almacenes] -> [Recuentos de Inventario] -> [Preparación Evento de Recuento] -> [Creación de Evento de Recuento]. | Recuadro rojo\n"
+                "PASO 3 | Pestaña inicial | Seleccionar [Añadir un nuevo valor]. | Importante la 1ª vez\n"
+                "PASO 4 | ID Evento Ejecución | Escribir código en [ID Evento Ejecución] y pulsar [Añadir]. | Añadir valor = código\n\n"
+                "## ⚠️ NOTAS IMPORTANTES\n"
+                "- La primera vez que se realiza un evento de recuento hay que añadir un valor.\n\n"
+                "## ✅ COMPROBACIÓN FINAL\n"
+                "- Verificar que el evento aparece guardado en ERP."
+            )
+            resp.proveedor_ia = "OpenAI · gpt-4.1-mini"
+
+            html_hoja = renderizar_respuesta_asistente_html(resp, turno_id=3)
+            self.assertIn("HOJA DE MANUAL OPERATIVO PASO A PASO", html_hoja)
+            self.assertIn("PANTALLA / MENÚ", html_hoja)
+            self.assertIn("VALOR / DATO CLAVE", html_hoja)
+            self.assertIn("FASE 1: Acceso y Creación del Evento", html_hoja)
+            self.assertIn("ID Evento Ejecución", html_hoja)
+            self.assertIn("➔", html_hoja)
+
+            ruta_xlsx = exportar_manual_ia_excel(resp, raiz_p / "out" / "Manual_Inventario.xlsx")
+            ruta_doc = exportar_manual_ia_word(resp, raiz_p / "out" / "Manual_Inventario.doc")
+            self.assertTrue(ruta_xlsx.is_file() and ruta_xlsx.stat().st_size > 400)
+            self.assertTrue(ruta_doc.is_file() and ruta_doc.stat().st_size > 800)
 
     def test_cache_manuales_ia_guarda_y_recupera_al_instante(self):
         with tempfile.TemporaryDirectory() as tmp:
