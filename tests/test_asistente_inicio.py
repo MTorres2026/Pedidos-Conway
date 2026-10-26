@@ -844,6 +844,38 @@ class ResilienciaManualVisualTests(unittest.TestCase):
         self.assertIn("Manual paso a paso", texto)
         self.assertIn("Gemini", prov)
 
+    def test_tras_429_visual_se_espera_y_se_envian_menos_diapositivas(self):
+        import io
+
+        err429 = urllib.error.HTTPError(
+            "https://api.openai.com", 429, "Too Many", {}, io.BytesIO(b"{}")
+        )
+        adjuntos = [
+            AdjuntoIA(nombre=f"d{i}.jpg", mime="image/jpeg", datos_b64="QUJD")
+            for i in range(20)
+        ]
+        claves = {"OPENAI_API_KEY": "sk-test", "OPENAI_MODEL": "", "GEMINI_API_KEY": ""}
+        with patch("modulos.asistente_inicio._leer_clave_env_local",
+                   side_effect=lambda n: claves.get(n, "")):
+            with patch("modulos.asistente_inicio.time.sleep") as mock_sleep:
+                with patch("urllib.request.urlopen",
+                           side_effect=[err429, self._mock_ok_openai()]) as mock_open:
+                    texto, prov, aviso = sintetizar_con_ia(
+                        "¿Cómo se hace la conciliación de inventario?",
+                        "[DOCUMENTO 1: Conciliación]\n1. Entrar en ERP.",
+                        adjuntos_ia=adjuntos,
+                    )
+        self.assertIn("Manual paso a paso", texto)
+        self.assertEqual(mock_sleep.call_count, 1)
+        payloads = []
+        for llamada in mock_open.call_args_list:
+            payloads.append(json.loads(llamada[0][0].data.decode("utf-8")))
+        n_img_1 = sum(1 for b in payloads[0]["messages"][1]["content"] if b.get("type") == "image_url")
+        n_img_2 = sum(1 for b in payloads[1]["messages"][1]["content"] if b.get("type") == "image_url")
+        self.assertLessEqual(n_img_1, 18)
+        self.assertLessEqual(n_img_2, 12)
+        self.assertLess(n_img_2, n_img_1)
+
     def test_correo_con_presentacion_solo_aporta_las_diapositivas(self):
         class _Res:
             id = 7

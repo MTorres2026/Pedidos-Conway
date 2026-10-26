@@ -712,7 +712,8 @@ class Inicio(QWidget):
             QMessageBox.warning(self, "Exportar manual", "No se encontró el manual generado para exportar.")
             return
         try:
-            slug = "_".join(normalizar(turno_sel.pregunta).split()[:6]) or "manual_operativo"
+            slug_crudo = "_".join(normalizar(turno_sel.pregunta).split()[:6])
+            slug = re.sub(r"[^a-z0-9_]+", "", slug_crudo).strip("_") or "manual_operativo"
             carpeta = self._carpeta_manuales_exportados()
             if formato == "excel":
                 destino = carpeta / f"Manual_{slug}.xlsx"

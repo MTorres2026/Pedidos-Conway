@@ -29,6 +29,7 @@ import os
 import posixpath
 import re
 import ssl
+import time
 import unicodedata
 import urllib.error
 import urllib.request
@@ -2691,10 +2692,13 @@ def sintetizar_con_ia(
         if lista_adjuntos else ""
     )
 
+    # Con diapositivas adjuntas, el texto se recorta: las imágenes ya llevan
+    # la información y un contexto gigante dispara el límite 429 de la API.
+    contexto_envio = contexto_rag[:14000] if lista_adjuntos else contexto_rag
     mensaje_usuario = (
         f"{resumen_historial}"
         f"PROCESO CONSULTADO POR EL USUARIO:\n{pregunta}\n\n"
-        f"TEXTO EXTRAÍDO DEL DOCUMENTO:\n{contexto_rag}"
+        f"TEXTO EXTRAÍDO DEL DOCUMENTO:\n{contexto_envio}"
         f"{nota_visual}"
     )
 
@@ -2719,18 +2723,24 @@ def sintetizar_con_ia(
             ultimo_err: Optional[Exception] = None
             datos: Optional[Dict] = None
             modelo_usado = modelos_candidatos[0]
+            hubo_429 = False
 
-            for mod_actual in modelos_candidatos:
+            for idx_mod, mod_actual in enumerate(modelos_candidatos):
                 modelo_usado = mod_actual
+                if hubo_429 and lista_adjuntos:
+                    # Tras un 429 se espera unos segundos en segundo plano y se
+                    # reintenta con una petición mucho más ligera, en vez de
+                    # bombardear la API con tres peticiones gigantes seguidas.
+                    time.sleep(6)
                 # Peticiones gigantes (decenas de diapositivas en alta detalle)
                 # provocan HTTP 429 por límite de tokens/minuto: se empieza
                 # con detalle alto solo si hay pocas imágenes, y cada reintento
                 # con otro modelo reduce imágenes y detalle.
-                det_img = "high" if len(lista_adjuntos) <= 10 else "low"
+                det_img = "high" if len(lista_adjuntos) <= 8 else "low"
                 if mod_actual == "gpt-4o-mini":
                     det_img = "low"
-                limite_adj = 28 if mod_actual == modelos_candidatos[0] else 16
-                adjs_envio = lista_adjuntos[:limite_adj]
+                limite_adj = (18, 12, 8)[min(idx_mod, 2)] if lista_adjuntos else 0
+                adjs_envio = lista_adjuntos[:limite_adj] if lista_adjuntos else []
                 contenido_usr = _construir_contenido_usuario_openai(
                     mensaje_usuario, adjs_envio, detalle_imagen=det_img
                 )
@@ -2758,6 +2768,7 @@ def sintetizar_con_ia(
                         # Límite temporal: NO rendirse. Se prueba el siguiente
                         # modelo con menos imágenes/detalle, y si OpenAI sigue
                         # saturado se cae a Gemini (abajo) si hay clave.
+                        hubo_429 = True
                         continue
                     if err_oa.code == 400 and any(a.mime == "application/pdf" for a in adjs_envio):
                         imgs_pdf: List[AdjuntoIA] = []
@@ -4296,7 +4307,7 @@ def generar_todas_las_hojas_word(
     for _clave, (_rango, resp_tmp, manual_tmp) in sorted(
         candidatos.items(), key=lambda kv: normalizar(kv[1][2].titulo)
     ):
-        slug = "_".join(normalizar(manual_tmp.titulo).split())[:70] or "manual"
+        slug = re.sub(r"[^a-z0-9_]+", "", "_".join(normalizar(manual_tmp.titulo).split()))[:70].strip("_") or "manual"
         destino = carpeta_destino / f"Hoja_Manual_{slug}.docx"
         exportar_manual_ia_docx(resp_tmp, destino)
         generadas.append(HojaWordGenerada(
