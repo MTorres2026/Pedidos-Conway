@@ -952,6 +952,54 @@ class ResilienciaManualVisualTests(unittest.TestCase):
         self.assertNotIn("GUÍA EXTRAÍDA", html_out)
 
 
+    def test_hoja_local_descarta_numeritos_de_flechas(self):
+        from modulos.asistente_inicio import PasajeManual
+
+        resp = RespuestaAsistente(
+            pregunta="¿Cómo se hace la conciliación de inventario?",
+            pasajes=[
+                PasajeManual(
+                    doc_id=2, titulo_documento="170608 Conciliación de inventarios",
+                    tipo_documento="pptx", fecha="", categoria="", remitente="",
+                    estado="NORMAL", titulo_seccion="Diapositiva 12",
+                    texto_seccion=(
+                        "1\nEscribe un código para identificar el evento.\n"
+                        "2\nPincha en «Añadir».\n"
+                        "http://200.53.162.47:31370/psp/cpfi91ts/EMPLOYEE/ERP/?cmd=expire"
+                    ),
+                    puntuacion=90.0,
+                ),
+            ],
+        )
+        manual = construir_manual_desde_respuesta(resp)
+        acciones = [p.accion for f in manual.fases for p in f.pasos]
+        self.assertIn("Escribe un código para identificar el evento.", acciones)
+        self.assertNotIn("1", acciones)
+        self.assertNotIn("2", acciones)
+        todo = " ".join(f"{p.pantalla} {p.accion}" for f in manual.fases for p in f.pasos)
+        self.assertIn("Abrir el acceso indicado", todo)
+        self.assertIn("http://200.53.162.47", todo)
+
+    def test_ocr_local_compone_manual_desde_capturas(self):
+        from modulos.asistente_inicio import construir_texto_ocr_desde_imagenes
+
+        class _MotorFake:
+            def disponible(self):
+                return True
+
+            def leer(self, datos):
+                return (
+                    "Gestión de Inventario\nCrear Evento de Inventario\n"
+                    "1\nEscribe un código para identificar el evento\nPincha en Añadir"
+                )
+
+        adj = [AdjuntoIA(nombre="d1.jpg", mime="image/jpeg", datos_b64="QUJD")]
+        with patch("modulos.biblioteca._MotorOcr", _MotorFake):
+            texto = construir_texto_ocr_desde_imagenes(adj, "¿Cómo se hace la conciliación?")
+        self.assertIn("Crear Evento de Inventario", texto)
+        self.assertIn("Escribe un código", texto)
+        self.assertNotIn("\n1\n", texto.replace("1. ", ""))
+
     def test_manual_visual_exacto_gana_a_correo_con_mucho_texto(self):
         fichas = {
             1: dict(

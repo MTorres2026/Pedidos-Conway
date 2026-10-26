@@ -40,6 +40,7 @@ from modulos.asistente_inicio import (
     RespuestaAsistente,
     construir_contexto_conversacional,
     construir_contexto_rag,
+    construir_texto_ocr_desde_imagenes,
     consultar_base_local,
     detectar_proveedor_ia,
     exportar_manual_ia_docx,
@@ -199,6 +200,19 @@ class _TrabajadorIA(QThread):
                 self.historial_previo,
                 adjuntos_ia=self.adjuntos_ia,
             )
+            if not texto_ia and self.adjuntos_ia:
+                # La IA está saturada: se leen las capturas del manual con el
+                # OCR local para no quedarse solo con los rótulos de texto.
+                try:
+                    texto_ocr = construir_texto_ocr_desde_imagenes(
+                        self.adjuntos_ia, self.pregunta
+                    )
+                except Exception:
+                    texto_ocr = ""
+                if texto_ocr:
+                    texto_ia = texto_ocr
+                    proveedor = "OCR local · capturas del manual"
+                    aviso = ""
         self.resultado_listo.emit(self.turno_id, texto_ia, proveedor, aviso)
 
 

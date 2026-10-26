@@ -2988,6 +2988,86 @@ def _separar_pantalla_accion(texto: str) -> Tuple[str, str]:
     return ("", (texto or "").strip())
 
 
+def construir_texto_ocr_desde_imagenes(
+    adjuntos_ia: Optional[List[AdjuntoIA]],
+    pregunta: str = "",
+) -> str:
+    """
+    Respaldo 100 % local cuando la IA está saturada (429): lee con OCR las
+    capturas/diapositivas del manual ganador y compone un texto de manual
+    con lo leído. Devuelve «» si no hay motor OCR o no se lee suficiente.
+    """
+    imagenes = [a for a in (adjuntos_ia or []) if (a.mime or "").startswith("image/")]
+    if not imagenes:
+        return ""
+    try:
+        from modulos.biblioteca import _MotorOcr
+
+        motor = _MotorOcr()
+        if not motor.disponible():
+            return ""
+    except Exception:
+        return ""
+
+    fases: List[Tuple[int, List[str]]] = []
+    vistos: Set[str] = set()
+    total = 0
+    for idx, adj in enumerate(imagenes[:18], 1):
+        try:
+            crudo = motor.leer(base64.b64decode(adj.datos_b64))
+        except Exception:
+            continue
+        lineas: List[str] = []
+        for cruda in (crudo or "").splitlines():
+            s = _limpiar_marcas_texto_plano(cruda)
+            s = re.sub(r"^[-•*▪▸◆●◦]\s*", "", s).strip()
+            if not s or _es_marcador_visual_suelto(s) or _es_linea_saludo_o_cortesia(s):
+                continue
+            if len(s) < 4 or sum(c.isalpha() for c in s) < 3:
+                continue
+            clave = normalizar(s)
+            if not clave or clave in vistos:
+                continue
+            vistos.add(clave)
+            lineas.append(s)
+        if lineas:
+            fases.append((idx, lineas))
+            total += len(lineas)
+    if total < 4:
+        return ""
+
+    titulo = "Manual paso a paso"
+    if (pregunta or "").strip():
+        titulo += f": {pregunta.strip()}"
+    salida = [f"# {_limpiar_marcas_texto_plano(titulo)}"]
+    n = 0
+    for idx, lineas in fases:
+        salida.append(f"## FASE: Diapositiva {idx} (texto leído de la captura)")
+        for s in lineas[:14]:
+            n += 1
+            salida.append(f"{n}. {s}")
+    return "\n".join(salida)
+
+
+def _es_marcador_visual_suelto(s: str) -> bool:
+    """Numeritos de flechas/recuadros de una diapositiva («1», «2»…): no son pasos."""
+    t = (s or "").strip().strip("()[]{}<>")
+    if not t:
+        return True
+    if re.fullmatch(r"\d{1,4}", t):
+        return True
+    if not re.search(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]", t) and len(t) <= 12:
+        return True
+    return False
+
+
+def _linea_url_a_paso(s: str) -> str:
+    m = re.search(r"https?://\S+", s or "")
+    if m and len(m.group(0)) >= len((s or "").strip()) - 10:
+        return f"Abrir el acceso indicado en la diapositiva: {m.group(0)}"
+    return s
+
+
 def construir_manual_desde_respuesta(respuesta: RespuestaAsistente) -> ManualEstructuradoIA:
     """
     Manual estructurado listo para pintar/exportar:
@@ -3084,6 +3164,9 @@ def construir_manual_desde_respuesta(respuesta: RespuestaAsistente) -> ManualEst
                 continue  # la portada del manual no es un paso
             if _es_linea_saludo_o_cortesia(s):
                 continue
+            if _es_marcador_visual_suelto(s):
+                continue  # numeritos de las flechas de la diapositiva
+            s = _linea_url_a_paso(s)
             es_explicita = bool(
                 re.match(r"^(\d{1,3})[.)\-]\s+", s) or re.match(r"^[-•*]\s+", s)
             )
@@ -3174,6 +3257,9 @@ def construir_manual_desde_respuesta(respuesta: RespuestaAsistente) -> ManualEst
                 s = re.sub(r"^[▪▸◆●◦]\s*", "", s).strip()
                 if not s or s.startswith("---") or _es_linea_saludo_o_cortesia(s):
                     continue
+                if _es_marcador_visual_suelto(s):
+                    continue
+                s = _linea_url_a_paso(s)
                 s = re.sub(r"^(\d{1,3})[.)\-]\s+", "", s)
                 s = re.sub(r"^[-•*]\s+", "", s).strip()
                 clave = normalizar(s)
