@@ -9,12 +9,16 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from modulos.asistente_inicio import (
+    AdjuntoIA,
     MARCA_NO_DISPONIBLE,
     buscar_procedimiento_confirmado,
     consultar_base_local,
     detectar_proveedor_ia,
     dividir_documento_en_secciones,
     extraer_terminos_consulta,
+    formatear_markdown_ia_html,
+    guardar_cache_manual_ia,
+    leer_cache_manual_ia,
     renderizar_respuesta_asistente_html,
     sintetizar_con_ia,
 )
@@ -279,7 +283,17 @@ class AsistenteIATests(unittest.TestCase):
             "choices": [
                 {
                     "message": {
-                        "content": "## 📋 Manual paso a paso: Conciliación\n1. **Entrar**: Cinema Manager."
+                        "content": (
+                            "# Manual paso a paso: Conciliación de Inventarios\n"
+                            "OBJETIVO: Cuadrar el stock físico frente al sistema.\n\n"
+                            "1. **Acceso al módulo**: Entra en [Cinema Manager] y pulsa [Inventario].\n"
+                            "   - Cierra antes todos los TPV.\n"
+                            "2. **Cierre y grabación**: Revisa diferencias y pulsa [Guardar].\n\n"
+                            "## ⚠️ Muy importante\n"
+                            "- Una vez cerrado no permite cambios.\n\n"
+                            "## ✅ Comprobación final\n"
+                            "- Verifica el estado [CONCILIADO]."
+                        )
                     }
                 }
             ]
@@ -290,13 +304,36 @@ class AsistenteIATests(unittest.TestCase):
 
         with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test-123"}, clear=False):
             self.assertEqual(detectar_proveedor_ia(), ("OpenAI", "sk-test-123"))
-            with patch("urllib.request.urlopen", return_value=mock_http):
+            with patch("urllib.request.urlopen", return_value=mock_http) as mock_open:
+                adj_pdf = AdjuntoIA(
+                    nombre="Conciliacion_Inventarios.pdf",
+                    mime="application/pdf",
+                    datos_b64="JVBERi0xLjQK",
+                )
                 texto, prov, aviso = sintetizar_con_ia(
                     "¿Cómo hago la conciliación de inventario?",
-                    "[FUENTE 1: Manual Inventario]\n1. Entrar en Conciliación.",
+                    "[FUENTE 1: Manual Inventario]",
+                    adjuntos_ia=[adj_pdf],
                 )
                 self.assertIn("Manual paso a paso", texto)
                 self.assertEqual(aviso, "")
+
+                # Verificar que el PDF viajó en el payload de OpenAI como bloque 'file'
+                req_enviada = mock_open.call_args[0][0]
+                payload_enviado = json.loads(req_enviada.data.decode("utf-8"))
+                contenido_user = payload_enviado["messages"][1]["content"]
+                self.assertEqual(contenido_user[0]["type"], "file")
+                self.assertIn("application/pdf;base64,", contenido_user[0]["file"]["file_data"])
+
+                # Verificar que el renderizador genera tarjetas en colores con PASO 1, PASO 2,
+                # botones destacados, sección importante y comprobación final
+                html_bonito = formatear_markdown_ia_html(texto, proveedor_ia=prov)
+                self.assertIn("Segoe UI", html_bonito)
+                self.assertIn("PASO 1", html_bonito)
+                self.assertIn("PASO 2", html_bonito)
+                self.assertIn("Cinema Manager", html_bonito)
+                self.assertIn("Muy importante", html_bonito)
+                self.assertIn("Comprobación final", html_bonito)
 
             with patch("urllib.request.urlopen", side_effect=urllib.error.URLError("sin red")):
                 texto_err, _, aviso_err = sintetizar_con_ia(
@@ -304,7 +341,22 @@ class AsistenteIATests(unittest.TestCase):
                     "[FUENTE 1: Manual Inventario]\n1. Entrar.",
                 )
                 self.assertEqual(texto_err, "")
-                self.assertIn("manual local", aviso_err)
+                self.assertIn("IA no disponible", aviso_err)
+
+    def test_cache_manuales_ia_guarda_y_recupera_al_instante(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            bib_mock = MagicMock()
+            bib_mock.carpeta = Path(tmp)
+            guardar_cache_manual_ia(
+                bib_mock,
+                "clave_inv_123",
+                "# Manual paso a paso: Inventario\n1. **Contar**:Abrir [Stock].",
+                "OpenAI · gpt-4o-mini",
+            )
+            recuperado = leer_cache_manual_ia(bib_mock, "clave_inv_123")
+            self.assertIsNotNone(recuperado)
+            self.assertIn("Inventario", recuperado[0])
+            self.assertEqual(recuperado[1], "OpenAI · gpt-4o-mini")
 
 
 class InicioInterfazChatTests(unittest.TestCase):

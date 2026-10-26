@@ -21,6 +21,8 @@ Cómo garantiza encontrar SIEMPRE el manual real y descartar los que no tienen n
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import html
 import json
 import os
@@ -29,8 +31,12 @@ import ssl
 import unicodedata
 import urllib.error
 import urllib.request
+import zipfile
 from dataclasses import dataclass, field
 from datetime import date
+from email import policy
+from email.parser import BytesParser
+from io import BytesIO
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Set, Tuple
 
@@ -243,6 +249,14 @@ class ProcedimientoCoincidente:
 
 
 @dataclass
+class AdjuntoIA:
+    """Archivo binario (PDF o imagen) preparado en el hilo principal para enviar a la IA."""
+    nombre: str
+    mime: str          # "application/pdf", "image/png", "image/jpeg", "image/webp"
+    datos_b64: str
+
+
+@dataclass
 class PasajeManual:
     doc_id: int
     titulo_documento: str
@@ -263,6 +277,8 @@ class RespuestaAsistente:
     terminos: List[str] = field(default_factory=list)
     procedimiento: Optional[ProcedimientoCoincidente] = None
     pasajes: List[PasajeManual] = field(default_factory=list)
+    adjuntos_ia: List[AdjuntoIA] = field(default_factory=list)
+    clave_cache_ia: str = ""
     texto_ia: str = ""
     proveedor_ia: str = ""
     aviso_ia: str = ""
@@ -995,8 +1011,289 @@ def buscar_pasajes_biblioteca(
 
 
 # ======================================================================
-# 5) Consulta completa local
+# 5) Consulta completa local + Preparación Multimodal (PDF / Capturas)
 # ======================================================================
+
+MAX_BYTES_ADJUNTO_IA = 10 * 1024 * 1024  # 10 MB máx para envío directo a IA
+MAX_PAGINAS_PDF_ADJUNTO = 18
+VERSION_CACHE_IA = "v2_manual_colores"
+
+_MIMES_IMAGEN = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+}
+
+
+def _resolver_ruta_documento(biblioteca, doc_id: int) -> Optional[Path]:
+    if biblioteca is None:
+        return None
+    if hasattr(biblioteca, "resolver_original"):
+        try:
+            ruta = biblioteca.resolver_original(doc_id)
+            if ruta and Path(ruta).is_file():
+                return Path(ruta)
+        except Exception:
+            pass
+    if hasattr(biblioteca, "obtener"):
+        try:
+            ficha = biblioteca.obtener(doc_id)
+            if ficha:
+                candidatas: List[Path] = []
+                guardada = str(ficha.get("ruta_copia") or "")
+                if guardada and hasattr(biblioteca, "originales"):
+                    nombre = guardada.replace("\\", "/").rsplit("/", 1)[-1]
+                    if nombre:
+                        candidatas.append(Path(biblioteca.originales) / nombre)
+                if guardada:
+                    candidatas.append(Path(guardada))
+                for campo in ("ruta_origen", "archivo"):
+                    val = ficha.get(campo)
+                    if val:
+                        candidatas.append(Path(str(val)))
+                for c in candidatas:
+                    if c.is_file():
+                        return c.resolve()
+        except Exception:
+            pass
+    return None
+
+
+def _contar_paginas_pdf_bytes(datos: bytes) -> int:
+    try:
+        from pypdf import PdfReader  # type: ignore
+        return len(PdfReader(BytesIO(datos)).pages)
+    except Exception:
+        n = len(re.findall(rb"/Type\s*/Page\b", datos))
+        return max(1, n)
+
+
+def _extraer_imagenes_de_pdf_bytes(datos_pdf: bytes, max_img: int = 8) -> List[AdjuntoIA]:
+    """Respaldo Vision: extrae capturas incrustadas en un PDF usando pypdf."""
+    salida: List[AdjuntoIA] = []
+    try:
+        from pypdf import PdfReader  # type: ignore
+        lector = PdfReader(BytesIO(datos_pdf))
+        for num_pag, pag in enumerate(lector.pages[:12], 1):
+            for idx_im, img in enumerate(getattr(pag, "images", []) or [], 1):
+                raw = getattr(img, "data", b"") or b""
+                if len(raw) < 12_000 or len(raw) > 4 * 1024 * 1024:
+                    continue
+                ext = Path(getattr(img, "name", "captura.png") or "captura.png").suffix.lower()
+                mime = _MIMES_IMAGEN.get(ext)
+                if not mime:
+                    if raw.startswith(b"\x89PNG"):
+                        mime = "image/png"
+                    elif raw.startswith(b"\xff\xd8"):
+                        mime = "image/jpeg"
+                    else:
+                        continue
+                salida.append(
+                    AdjuntoIA(
+                        nombre=f"pagina_{num_pag}_{idx_im}{ext or '.png'}",
+                        mime=mime,
+                        datos_b64=base64.b64encode(raw).decode("ascii"),
+                    )
+                )
+                if len(salida) >= max_img:
+                    return salida
+    except Exception:
+        return salida
+    return salida
+
+
+def _extraer_imagenes_office_zip(ruta: Path, max_img: int = 8) -> List[AdjuntoIA]:
+    """Extrae capturas de pantalla internas de un .pptx o .docx."""
+    salida: List[AdjuntoIA] = []
+    try:
+        with zipfile.ZipFile(ruta) as z:
+            nombres = sorted(
+                n for n in z.namelist()
+                if ("/media/" in n or n.startswith("media/"))
+                and Path(n).suffix.lower() in _MIMES_IMAGEN
+            )
+            for nombre in nombres:
+                raw = z.read(nombre)
+                if len(raw) < 12_000 or len(raw) > 4 * 1024 * 1024:
+                    continue
+                ext = Path(nombre).suffix.lower()
+                salida.append(
+                    AdjuntoIA(
+                        nombre=Path(nombre).name,
+                        mime=_MIMES_IMAGEN[ext],
+                        datos_b64=base64.b64encode(raw).decode("ascii"),
+                    )
+                )
+                if len(salida) >= max_img:
+                    break
+    except Exception:
+        return []
+    return salida
+
+
+def extraer_adjuntos_multimodales_para_ia(
+    biblioteca,
+    pasajes: Sequence[PasajeManual],
+    ranuras: Sequence[Tuple[str, ...]],
+) -> List[AdjuntoIA]:
+    """
+    Prepara el PDF o las capturas del documento ganador para que OpenAI / Gemini
+    puedan leer directamente páginas escaneadas, capturas de pantalla, botones y flechas
+    del manual y redactar una guía paso a paso completa sin enseñar el PDF crudo.
+    """
+    if biblioteca is None or not pasajes:
+        return []
+
+    primero = pasajes[0]
+    ruta = _resolver_ruta_documento(biblioteca, primero.doc_id)
+    if ruta is None or not ruta.is_file():
+        return []
+
+    try:
+        tam = ruta.stat().st_size
+    except OSError:
+        return []
+    if tam <= 0 or tam > MAX_BYTES_ADJUNTO_IA:
+        return []
+
+    texto_total = "\n".join(p.texto_seccion for p in pasajes if p.doc_id == primero.doc_id)
+    sin_ocr = all(p.sin_texto_ocr for p in pasajes if p.doc_id == primero.doc_id)
+    ext = ruta.suffix.lower()
+
+    try:
+        if ext == ".pdf":
+            datos = ruta.read_bytes()
+            n_pags = _contar_paginas_pdf_bytes(datos)
+            if sin_ocr or n_pags <= MAX_PAGINAS_PDF_ADJUNTO or len(texto_total) < 2400:
+                return [
+                    AdjuntoIA(
+                        nombre=ruta.name,
+                        mime="application/pdf",
+                        datos_b64=base64.b64encode(datos).decode("ascii"),
+                    )
+                ]
+
+        elif ext in _MIMES_IMAGEN:
+            datos = ruta.read_bytes()
+            return [
+                AdjuntoIA(
+                    nombre=ruta.name,
+                    mime=_MIMES_IMAGEN[ext],
+                    datos_b64=base64.b64encode(datos).decode("ascii"),
+                )
+            ]
+
+        elif ext in (".pptx", ".docx") and (sin_ocr or len(texto_total) < 900):
+            return _extraer_imagenes_office_zip(ruta)
+
+        elif ext == ".eml":
+            with ruta.open("rb") as f:
+                correo = BytesParser(policy=policy.default).parse(f)
+            pdfs_correo: List[Tuple[int, str, bytes]] = []
+            imgs_correo: List[AdjuntoIA] = []
+            for adj in correo.iter_attachments():
+                nom = adj.get_filename() or ""
+                ext_a = Path(nom).suffix.lower()
+                raw = adj.get_payload(decode=True) or b""
+                if not raw or len(raw) > MAX_BYTES_ADJUNTO_IA:
+                    continue
+                if ext_a == ".pdf":
+                    norm_nom = normalizar(nom)
+                    aciertos = sum(1 for r in ranuras if _ranura_coincide_en(r, norm_nom))
+                    pdfs_correo.append((aciertos, nom, raw))
+                elif ext_a in _MIMES_IMAGEN and len(raw) >= 12_000 and len(imgs_correo) < 6:
+                    imgs_correo.append(
+                        AdjuntoIA(
+                            nombre=nom or "captura.png",
+                            mime=_MIMES_IMAGEN[ext_a],
+                            datos_b64=base64.b64encode(raw).decode("ascii"),
+                        )
+                    )
+            if pdfs_correo:
+                pdfs_correo.sort(key=lambda x: x[0], reverse=True)
+                _, nom_pdf, raw_pdf = pdfs_correo[0]
+                if _contar_paginas_pdf_bytes(raw_pdf) <= MAX_PAGINAS_PDF_ADJUNTO:
+                    return [
+                        AdjuntoIA(
+                            nombre=nom_pdf,
+                            mime="application/pdf",
+                            datos_b64=base64.b64encode(raw_pdf).decode("ascii"),
+                        )
+                    ]
+            if sin_ocr and imgs_correo:
+                return imgs_correo
+    except Exception:
+        return []
+
+    return []
+
+
+def _construir_clave_cache_ia(
+    ranuras: Sequence[Tuple[str, ...]],
+    procedimiento: Optional[ProcedimientoCoincidente],
+    pasajes: Sequence[PasajeManual],
+) -> str:
+    if not procedimiento and not pasajes:
+        return ""
+    firma_ranuras = "|".join(",".join(sorted(r)) for r in ranuras)
+    firma_proc = procedimiento.id if procedimiento else ""
+    firma_docs = ";".join(
+        f"{p.doc_id}:{p.fecha}:{len(p.texto_seccion)}" for p in pasajes
+    )
+    semilla = f"{VERSION_CACHE_IA}||{firma_ranuras}||{firma_proc}||{firma_docs}"
+    return hashlib.sha256(semilla.encode("utf-8")).hexdigest()[:24]
+
+
+def leer_cache_manual_ia(biblioteca, clave_cache: str) -> Optional[Tuple[str, str]]:
+    if not clave_cache or biblioteca is None:
+        return None
+    carpeta = getattr(biblioteca, "carpeta", None)
+    if not carpeta:
+        return None
+    ruta = Path(carpeta) / "cache_manuales_ia.json"
+    if not ruta.is_file():
+        return None
+    try:
+        datos = json.loads(ruta.read_text(encoding="utf-8"))
+        item = datos.get(clave_cache)
+        if isinstance(item, dict) and item.get("texto_ia"):
+            return (str(item["texto_ia"]), str(item.get("proveedor", "IA")))
+    except Exception:
+        return None
+    return None
+
+
+def guardar_cache_manual_ia(
+    biblioteca,
+    clave_cache: str,
+    texto_ia: str,
+    proveedor: str,
+) -> None:
+    if not clave_cache or not texto_ia or texto_ia == MARCA_NO_DISPONIBLE or biblioteca is None:
+        return
+    carpeta = getattr(biblioteca, "carpeta", None)
+    if not carpeta:
+        return
+    ruta = Path(carpeta) / "cache_manuales_ia.json"
+    try:
+        datos: Dict = {}
+        if ruta.is_file():
+            try:
+                datos = json.loads(ruta.read_text(encoding="utf-8"))
+                if not isinstance(datos, dict):
+                    datos = {}
+            except Exception:
+                datos = {}
+        datos[clave_cache] = {"texto_ia": texto_ia, "proveedor": proveedor}
+        if len(datos) > 120:
+            # Conservar las últimas 120 entradas
+            claves = list(datos.keys())[-120:]
+            datos = {k: datos[k] for k in claves}
+        ruta.write_text(json.dumps(datos, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
 
 def consultar_base_local(
     pregunta: str,
@@ -1007,6 +1304,7 @@ def consultar_base_local(
     proc = buscar_procedimiento_confirmado(pregunta, terminos)
 
     pasajes: List[PasajeManual] = []
+    adjuntos_ia: List[AdjuntoIA] = []
     vacia = False
     total_docs = 0
     error_bib: Optional[str] = None
@@ -1020,14 +1318,22 @@ def consultar_base_local(
                 pasajes = buscar_pasajes_biblioteca(
                     biblioteca, pregunta, ranuras, max_documentos=2
                 )
+                if pasajes:
+                    adjuntos_ia = extraer_adjuntos_multimodales_para_ia(
+                        biblioteca, pasajes, ranuras
+                    )
         except Exception as e:
             error_bib = str(e)
+
+    clave_cache = _construir_clave_cache_ia(ranuras, proc, pasajes)
 
     return RespuestaAsistente(
         pregunta=pregunta,
         terminos=terminos,
         procedimiento=proc,
         pasajes=pasajes,
+        adjuntos_ia=adjuntos_ia,
+        clave_cache_ia=clave_cache,
         biblioteca_vacia=vacia,
         total_documentos=total_docs,
         error_biblioteca=error_bib,
@@ -1035,7 +1341,7 @@ def consultar_base_local(
 
 
 # ======================================================================
-# 6) Verificador + Redactor de Manual con IA (OpenAI / Gemini)
+# 6) Verificador + Redactor Multimodal de Manual Paso a Paso con IA
 # ======================================================================
 
 MARCA_NO_DISPONIBLE = "NO_DISPONIBLE"
@@ -1045,19 +1351,25 @@ def _leer_clave_env_local(nombre: str) -> str:
     valor = (os.environ.get(nombre) or "").strip()
     if valor:
         return valor
-    ruta_env = Path(__file__).resolve().parents[2] / ".env"
-    if not ruta_env.is_file():
-        return ""
-    try:
-        for linea in ruta_env.read_text(encoding="utf-8", errors="ignore").splitlines():
-            s = linea.strip()
-            if not s or s.startswith("#") or "=" not in s:
-                continue
-            k, v = s.split("=", 1)
-            if k.strip() == nombre:
-                return v.strip().strip('"').strip("'")
-    except Exception:
-        return ""
+    posibles = [
+        Path(__file__).resolve().parents[2] / ".env",
+        Path.cwd() / ".env",
+    ]
+    for ruta_env in posibles:
+        if not ruta_env.is_file():
+            continue
+        try:
+            for linea in ruta_env.read_text(encoding="utf-8", errors="ignore").splitlines():
+                s = linea.strip()
+                if not s or s.startswith("#") or "=" not in s:
+                    continue
+                k, v = s.split("=", 1)
+                if k.strip() == nombre:
+                    val = v.strip().strip('"').strip("'")
+                    if val:
+                        return val
+        except Exception:
+            continue
     return ""
 
 
@@ -1072,9 +1384,6 @@ def detectar_proveedor_ia() -> Optional[Tuple[str, str]]:
 
 
 def construir_contexto_rag(respuesta: RespuestaAsistente) -> str:
-    if respuesta.solo_documento_sin_ocr:
-        return ""
-
     bloques: List[str] = []
 
     if respuesta.procedimiento is not None:
@@ -1091,8 +1400,6 @@ def construir_contexto_rag(respuesta: RespuestaAsistente) -> str:
         bloques.append("\n".join(lineas))
 
     for i, pasaje in enumerate(respuesta.pasajes, 1):
-        if pasaje.sin_texto_ocr:
-            continue
         meta = " | ".join(
             x for x in (
                 f"Documento: {pasaje.titulo_documento}",
@@ -1100,33 +1407,46 @@ def construir_contexto_rag(respuesta: RespuestaAsistente) -> str:
                 f"Fecha: {pasaje.fecha}" if pasaje.fecha else "",
             ) if x
         )
-        bloques.append(f"[FUENTE {i}: {meta}]\n{pasaje.texto_seccion}")
+        if pasaje.sin_texto_ocr:
+            bloques.append(
+                f"[FUENTE {i}: {meta}]\n"
+                "(El contenido de este manual viene en el archivo PDF/imágenes adjunto; "
+                "lee todas sus páginas y capturas de pantalla para redactar cada paso)."
+            )
+        else:
+            bloques.append(f"[FUENTE {i}: {meta}]\n{pasaje.texto_seccion}")
 
     return "\n\n---\n\n".join(bloques)
 
 
 _PROMPT_SISTEMA_RAG = (
-    "Eres el redactor de manuales operativos internos de CineStock.\n"
-    "Tu trabajo tiene dos reglas esenciales:\n\n"
-    "1. CUÁNDO RESPONDER 'NO_DISPONIBLE':\n"
-    "   Responde ÚNICAMENTE con la palabra exacta NO_DISPONIBLE si el CONTEXTO trata en "
-    "   realidad de OTRO trámite distinto al preguntado (por ejemplo: preguntan por "
-    "   'solicitud de pedido' y el texto habla de solicitudes de vacaciones/permisos; o "
-    "   preguntan por 'conciliación de inventario' y el texto habla de conciliación laboral "
-    "   o solo nombra la palabra inventario en una línea suelta del cierre de día sin "
-    "   explicar el proceso).\n\n"
-    "2. CUÁNDO REDACTAR EL MANUAL PASO A PASO:\n"
-    "   Si el CONTEXTO sí trata del proceso consultado (aunque en el PDF/documento original "
-    "   esté redactado en párrafos, diapositivas o viñetas), conviértelo en un MANUAL "
-    "   PASO A PASO súper claro, ordenado y fiel al 100 % al documento (sin inventar nada "
-    "   externo ni mezclar pasos de otros apartados ajenos):\n"
-    "   ## 📋 Manual paso a paso: [Nombre del proceso]\n"
-    "   1. **[Acción principal]**: detalle exacto según el manual.\n"
-    "   2. **[Siguiente acción]**: detalle exacto según el manual.\n"
-    "   (...)\n"
-    "   ## ⚠️ Puntos clave a revisar\n"
-    "   - (Solo si el documento incluye comprobaciones, notas o advertencias).\n"
-    "   Fuente: [Nombre del documento]."
+    "Eres el redactor experto de manuales operativos de CineStock para personal de cine.\n"
+    "Tu misión es leer el documento/PDF/capturas proporcionado y escribir un MANUAL PASO A PASO "
+    "precioso, clarísimo, autónomo y 100 % fiel al documento para que el compañero pueda "
+    "realizar el proceso de principio a fin SIN tener que abrir el PDF.\n\n"
+    "REGLA 1 — CUÁNDO RESPONDER 'NO_DISPONIBLE':\n"
+    "Responde ÚNICAMENTE con la palabra exacta NO_DISPONIBLE si el material proporcionado "
+    "trata en realidad de OTRO trámite distinto al preguntado (por ejemplo: preguntan por "
+    "'solicitud de pedido' y el documento es de vacaciones/RRHH; o preguntan por "
+    "'conciliación de inventario' y trata de conciliación familiar o solo lo menciona "
+    "de pasada en una línea sin explicar cómo hacerlo).\n\n"
+    "REGLA 2 — FORMATO OBLIGATORIO DEL MANUAL PASO A PASO:\n"
+    "Cuando el documento SÍ explique el proceso (leyendo tanto el texto como todos los "
+    "botones, pestañas, campos y notas que aparezcan en las capturas del PDF/imágenes), "
+    "redáctalo SIEMPRE con esta estructura exacta:\n\n"
+    "# Manual paso a paso: [Nombre claro del proceso]\n"
+    "OBJETIVO: [1 frase clara y directa explicando qué conseguimos con este proceso]\n\n"
+    "1. **[Título breve del paso 1]**: Explicación clara y detallada. Escribe siempre los "
+    "nombres de programas, menús, pestañas, campos o botones entre corchetes, por ejemplo "
+    "[Cinema Manager], [Inventario], [Conciliación] o [Guardar].\n"
+    "   - Si dentro del paso hay subdetalles o datos a rellenar, añádelos con guion debajo.\n"
+    "2. **[Título breve del paso 2]**: Explicación detallada del siguiente paso...\n"
+    "3. **[Título breve del paso 3]**: (... incluye TODOS los pasos del documento en orden, "
+    "sin saltarte ninguno ni inventar pasos externos).\n\n"
+    "## ⚠️ Muy importante\n"
+    "- [Advertencias, errores frecuentes a evitar o condiciones clave indicadas en el manual]\n\n"
+    "## ✅ Comprobación final\n"
+    "- [Cómo verificar en pantalla que el proceso ha quedado correctamente grabado/cerrado]"
 )
 
 
@@ -1164,25 +1484,52 @@ def _explicar_http_error(proveedor: str, err: urllib.error.HTTPError) -> str:
         detalle = ""
 
     if err.code == 401:
-        return f"Clave de {proveedor} no válida en .env (HTTP 401). Mostrando manual local."
+        return f"Clave de {proveedor} no válida en .env (HTTP 401). Mostrando guía local."
     if err.code == 429:
         if "insufficient_quota" in str(detalle).lower() or "quota" in str(detalle).lower():
             return (
                 f"Tu cuenta de {proveedor} no tiene saldo disponible (HTTP 429). "
-                "Mostrando manual local."
+                "Recarga saldo en OpenAI o usa GEMINI_API_KEY en .env para activar la IA."
             )
-        return f"Límite temporal de {proveedor} (HTTP 429). Mostrando manual local."
-    return f"{proveedor} devolvió HTTP {err.code}. Mostrando manual local."
+        return f"Límite temporal de {proveedor} (HTTP 429). Inténtalo en unos segundos."
+    return f"{proveedor} devolvió HTTP {err.code} ({str(detalle)[:90]})."
+
+
+def _construir_contenido_usuario_openai(
+    mensaje_usuario: str,
+    adjuntos: Sequence[AdjuntoIA],
+) -> object:
+    if not adjuntos:
+        return mensaje_usuario
+    bloques: List[Dict] = []
+    for adj in adjuntos:
+        if adj.mime == "application/pdf":
+            bloques.append({
+                "type": "file",
+                "file": {
+                    "filename": adj.nombre or "manual.pdf",
+                    "file_data": f"data:application/pdf;base64,{adj.datos_b64}",
+                },
+            })
+        elif adj.mime.startswith("image/"):
+            bloques.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:{adj.mime};base64,{adj.datos_b64}"},
+            })
+    bloques.append({"type": "text", "text": mensaje_usuario})
+    return bloques
 
 
 def sintetizar_con_ia(
     pregunta: str,
     contexto_rag: str,
     historial_turnos: Optional[Sequence[Tuple[str, str]]] = None,
-    timeout: float = 20.0,
+    adjuntos_ia: Optional[Sequence[AdjuntoIA]] = None,
+    timeout: float = 55.0,
 ) -> Tuple[str, str, str]:
     deteccion = detectar_proveedor_ia()
-    if not deteccion or not contexto_rag.strip():
+    lista_adjuntos = list(adjuntos_ia or [])
+    if not deteccion or (not contexto_rag.strip() and not lista_adjuntos):
         return ("", "", "")
 
     proveedor, api_key = deteccion
@@ -1200,26 +1547,67 @@ def sintetizar_con_ia(
         f"PROCESO CONSULTADO POR EL USUARIO:\n{pregunta}"
     )
 
+    timeout_efectivo = max(timeout, 60.0) if lista_adjuntos else timeout
+
     try:
         if proveedor == "OpenAI":
             modelo = _leer_clave_env_local("OPENAI_MODEL") or "gpt-4o-mini"
-            datos = _peticion_json_https(
-                "https://api.openai.com/v1/chat/completions",
-                headers={
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {api_key}",
-                },
-                payload={
-                    "model": modelo,
-                    "temperature": 0.0,
-                    "max_tokens": 950,
-                    "messages": [
-                        {"role": "system", "content": _PROMPT_SISTEMA_RAG},
-                        {"role": "user", "content": mensaje_usuario},
-                    ],
-                },
-                timeout=timeout,
-            )
+            url_oa = "https://api.openai.com/v1/chat/completions"
+            cabeceras_oa = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {api_key}",
+            }
+
+            contenido_usr = _construir_contenido_usuario_openai(mensaje_usuario, lista_adjuntos)
+            try:
+                datos = _peticion_json_https(
+                    url_oa,
+                    headers=cabeceras_oa,
+                    payload={
+                        "model": modelo,
+                        "temperature": 0.0,
+                        "max_tokens": 1800,
+                        "messages": [
+                            {"role": "system", "content": _PROMPT_SISTEMA_RAG},
+                            {"role": "user", "content": contenido_usr},
+                        ],
+                    },
+                    timeout=timeout_efectivo,
+                )
+            except urllib.error.HTTPError as err_oa:
+                if err_oa.code == 400 and lista_adjuntos:
+                    # Respaldo: si el modelo configurado no soporta 'type: file',
+                    # extraemos las capturas del PDF como imágenes Vision o usamos el texto
+                    imgs_respaldo: List[AdjuntoIA] = []
+                    for adj in lista_adjuntos:
+                        if adj.mime == "application/pdf":
+                            try:
+                                raw_pdf = base64.b64decode(adj.datos_b64)
+                                imgs_respaldo.extend(_extraer_imagenes_de_pdf_bytes(raw_pdf))
+                            except Exception:
+                                pass
+                        elif adj.mime.startswith("image/"):
+                            imgs_respaldo.append(adj)
+                    contenido_alt = _construir_contenido_usuario_openai(
+                        mensaje_usuario, imgs_respaldo
+                    )
+                    datos = _peticion_json_https(
+                        url_oa,
+                        headers=cabeceras_oa,
+                        payload={
+                            "model": modelo,
+                            "temperature": 0.0,
+                            "max_tokens": 1800,
+                            "messages": [
+                                {"role": "system", "content": _PROMPT_SISTEMA_RAG},
+                                {"role": "user", "content": contenido_alt},
+                            ],
+                        },
+                        timeout=timeout_efectivo,
+                    )
+                else:
+                    raise
+
             texto = (
                 datos.get("choices", [{}])[0]
                 .get("message", {})
@@ -1236,6 +1624,16 @@ def sintetizar_con_ia(
                 f"https://generativelanguage.googleapis.com/v1beta/models/"
                 f"{modelo}:generateContent"
             )
+            partes_usr: List[Dict] = []
+            for adj in lista_adjuntos:
+                partes_usr.append({
+                    "inline_data": {
+                        "mime_type": adj.mime,
+                        "data": adj.datos_b64,
+                    }
+                })
+            partes_usr.append({"text": mensaje_usuario})
+
             datos = _peticion_json_https(
                 url,
                 headers={
@@ -1244,10 +1642,10 @@ def sintetizar_con_ia(
                 },
                 payload={
                     "system_instruction": {"parts": [{"text": _PROMPT_SISTEMA_RAG}]},
-                    "contents": [{"role": "user", "parts": [{"text": mensaje_usuario}]}],
-                    "generationConfig": {"temperature": 0.0, "maxOutputTokens": 1000},
+                    "contents": [{"role": "user", "parts": partes_usr}],
+                    "generationConfig": {"temperature": 0.0, "maxOutputTokens": 2000},
                 },
-                timeout=timeout,
+                timeout=timeout_efectivo,
             )
             partes = (
                 datos.get("candidates", [{}])[0]
@@ -1262,15 +1660,25 @@ def sintetizar_con_ia(
     except urllib.error.HTTPError as e:
         return ("", proveedor, _explicar_http_error(proveedor, e))
     except Exception as e:
-        motivo = "certificado SSL" if "SSL" in str(e).upper() else "red"
-        return ("", proveedor, f"IA sin conexión ({motivo}); mostrando manual local.")
+        motivo = "certificado SSL" if "SSL" in str(e).upper() else "tiempo de espera o red"
+        return ("", proveedor, f"IA no disponible ({motivo}).")
 
     return ("", "", "")
 
 
 # ======================================================================
-# 7) Formateo HTML limpio (Manual exacto, Aviso OCR o Cartel NO DISPONIBLE)
+# 7) Diseño Visual en Colores y Tipografía Limpia (Qt Rich Text HTML4)
 # ======================================================================
+
+FUENTE_UI = "'Segoe UI', 'Calibri', 'Trebuchet MS', Arial, sans-serif"
+
+# Paleta armónica para las tarjetas numeradas (borde / insignia / título / fondo suave)
+PALETA_PASOS: Tuple[Tuple[str, str, str, str], ...] = (
+    ("#2563EB", "#2563EB", "#1D4ED8", "#F8FAFF"),  # Azul Real
+    ("#4F46E5", "#4F46E5", "#4338CA", "#F9F9FF"),  # Índigo
+    ("#0284C7", "#0284C7", "#0369A1", "#F7FCFF"),  # Océano
+    ("#0D9488", "#0D9488", "#0F766E", "#F7FEFC"),  # Esmeralda Turquesa
+)
 
 ICONOS_DOC = {
     "correo": "✉️ Correo",
@@ -1282,6 +1690,29 @@ ICONOS_DOC = {
     "zip": "🗜 ZIP",
     "imagen": "🖼 Imagen",
 }
+
+
+def _decorar_linea_rica_ia(texto_crudo: str) -> str:
+    """
+    Escapa HTML de forma segura y aplica formato visual bonito:
+      - **negrita** -> texto destacado oscuro
+      - [Botón / Menú] -> pastilla visual estilo botón azul suave
+    """
+    esc = html.escape(texto_crudo or "")
+    esc = re.sub(
+        r"\*\*(.+?)\*\*",
+        r'<b style="color:#0F172A;">\1</b>',
+        esc,
+    )
+    esc = re.sub(
+        r"\[([^\[\]]{2,80})\]",
+        (
+            r'<span style="background-color:#DBEAFE; color:#1E40AF; '
+            r'font-weight:bold;">&nbsp;\1&nbsp;</span>'
+        ),
+        esc,
+    )
+    return esc
 
 
 def resaltar_terminos_html(texto_plano: str, terminos: Sequence[str]) -> str:
@@ -1301,7 +1732,7 @@ def resaltar_terminos_html(texto_plano: str, terminos: Sequence[str]) -> str:
         if rx_raices.match(sin_acentos(palabra).lower()):
             return (
                 '<span style="background-color:#FEF08A; color:#0F172A; '
-                f'font-weight:600;">{palabra}</span>'
+                f'font-weight:bold;">{palabra}</span>'
             )
         return palabra
 
@@ -1311,87 +1742,317 @@ def resaltar_terminos_html(texto_plano: str, terminos: Sequence[str]) -> str:
     return "".join(partes)
 
 
-def formatear_bloque_manual_html(texto: str, terminos: Sequence[str]) -> str:
-    lineas_html: List[str] = []
-    for linea in (texto or "").splitlines():
-        s = linea.strip()
-        if not s:
-            lineas_html.append('<div style="height:5px;"></div>')
-            continue
+def _html_tarjeta_paso(
+    num_paso: int,
+    titulo_paso: str,
+    cuerpo_html: str,
+    subpuntos_html: Sequence[str],
+) -> str:
+    borde, badge_bg, color_tit, fondo_card = PALETA_PASOS[(max(1, num_paso) - 1) % len(PALETA_PASOS)]
 
-        m_num = re.match(r"^(\d{1,2}[.)\-])\s+(.*)$", s)
-        if m_num:
-            num_esc = html.escape(m_num.group(1))
-            resto = resaltar_terminos_html(m_num.group(2), terminos)
-            lineas_html.append(
-                f'<div style="margin:4px 0 4px 8px;">'
-                f'<b style="color:#1D4ED8;">{num_esc}</b> {resto}</div>'
-            )
-        elif re.match(r"^(nota|importante|atenci[oó]n)\s*:", s, re.IGNORECASE):
-            lineas_html.append(
-                f'<div style="margin:5px 0 5px 8px; padding:4px 8px; '
-                f'background-color:#FFFBEB; border-left:3px solid #D97706; color:#92400E;">'
-                f"{resaltar_terminos_html(s, terminos)}</div>"
-            )
-        elif re.match(r"^[-•*▪▸]\s+", s):
-            cuerpo_v = resaltar_terminos_html(re.sub(r"^[-•*▪▸]\s+", "", s), terminos)
-            lineas_html.append(
-                f'<div style="margin:3px 0 3px 10px;">'
-                f'<span style="color:#1D4ED8; font-weight:bold;">•</span> {cuerpo_v}</div>'
-            )
-        else:
-            lineas_html.append(f'<div style="margin:2px 0;">{resaltar_terminos_html(s, terminos)}</div>')
+    bloque_tit = (
+        f'<div style="font-family:{FUENTE_UI}; font-size:14px; font-weight:bold; '
+        f'color:{color_tit}; margin-bottom:4px;">{titulo_paso}</div>'
+        if titulo_paso
+        else ""
+    )
+    bloque_cuerpo = (
+        f'<div style="font-family:{FUENTE_UI}; font-size:13.5px; color:#1E293B; '
+        f'line-height:1.5;">{cuerpo_html}</div>'
+        if cuerpo_html
+        else ""
+    )
+    bloque_subs = ""
+    if subpuntos_html:
+        items = "".join(
+            f'<div style="margin:4px 0 2px 6px; font-family:{FUENTE_UI}; '
+            f'font-size:13px; color:#334155; line-height:1.45;">'
+            f'<span style="color:{badge_bg}; font-weight:bold;">➜</span> {sp}</div>'
+            for sp in subpuntos_html
+        )
+        bloque_subs = f'<div style="margin-top:4px;">{items}</div>'
 
-    return "".join(lineas_html)
+    return (
+        f'<table width="100%" cellpadding="10" cellspacing="0" bgcolor="{fondo_card}" '
+        f'style="border:1px solid #DBEAFE; border-left:5px solid {borde}; margin-bottom:8px;">'
+        "<tr>"
+        '<td width="76" valign="top" style="padding-right:6px;">'
+        f'<table cellpadding="4" cellspacing="0" bgcolor="{badge_bg}">'
+        "<tr>"
+        f'<td style="color:#FFFFFF; font-family:{FUENTE_UI}; font-size:11px; '
+        'font-weight:bold; white-space:nowrap;">'
+        f"&nbsp;PASO {num_paso}&nbsp;"
+        "</td></tr></table>"
+        "</td>"
+        f'<td valign="top">{bloque_tit}{bloque_cuerpo}{bloque_subs}</td>'
+        "</tr></table>"
+    )
 
 
-def formatear_markdown_ia_html(texto_ia: str) -> str:
-    lineas_out: List[str] = []
+def _separar_titulo_y_cuerpo_paso(texto_paso: str) -> Tuple[str, str]:
+    """
+    Si el paso empieza por '**Título**: explicación' o 'Título: explicación',
+    separa el título para pintarlo con jerarquía de color propia.
+    """
+    s = texto_paso.strip()
+    m_bold = re.match(r"^\*\*(.+?)\*\*\s*[:\-–—.]?\s*(.*)$", s)
+    if m_bold:
+        return (html.escape(m_bold.group(1).strip()), _decorar_linea_rica_ia(m_bold.group(2).strip()))
+
+    m_colon = re.match(r"^([^:]{3,55}):\s+(.+)$", s)
+    if m_colon and "[" not in m_colon.group(1):
+        return (html.escape(m_colon.group(1).strip()), _decorar_linea_rica_ia(m_colon.group(2).strip()))
+
+    return ("", _decorar_linea_rica_ia(s))
+
+
+def formatear_markdown_ia_html(
+    texto_ia: str,
+    titulo_respaldo: str = "Manual operativo paso a paso",
+    proveedor_ia: str = "IA",
+) -> str:
+    """
+    Convierte la respuesta estructurada de la IA en un manual visual con colores,
+    tipografía limpia ('Segoe UI'), tarjetas numeradas PASO 1..N y cajas destacadas.
+    """
+    titulo_manual = ""
+    objetivo = ""
+    pasos: List[Dict] = []  # {"num": int, "titulo": str, "cuerpo": str, "subs": List[str]}
+    notas_importantes: List[str] = []
+    comprobaciones: List[str] = []
+    bloques_libres: List[str] = []
+
+    seccion_actual = "pasos"  # "pasos" | "importante" | "comprobacion"
+
     for cruda in (texto_ia or "").splitlines():
         s = cruda.strip()
         if not s:
-            lineas_out.append('<div style="height:6px;"></div>')
             continue
 
-        esc = html.escape(s)
-        esc = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", esc)
-        esc = re.sub(
-            r"\[([^\[\]]{2,90})\]",
-            r'<span style="color:#1E40AF; font-weight:600;">[\1]</span>',
-            esc,
+        # Ignorar pie "Fuente: ..." suelto porque ya pintamos un pie discreto interactivo
+        if re.match(r"^(?:\*\*)?fuente(?:\*\*)?\s*:", s, re.IGNORECASE) and len(s) < 140:
+            continue
+
+        # Título principal (# ...)
+        if re.match(r"^#{1,2}\s+", s) and not titulo_manual and not pasos:
+            limpio_t = re.sub(r"^#{1,2}\s+", "", s).strip()
+            limpio_t = re.sub(r"^[📋📘✨\s]+", "", limpio_t).strip()
+            limpio_t = re.sub(r"\*\*(.+?)\*\*", r"\1", limpio_t)
+            if not re.search(r"(importante|puntos clave|advertencia|comprobaci|resultado)", normalizar(limpio_t)):
+                titulo_manual = limpio_t
+                continue
+
+        # Objetivo inicial
+        m_obj = re.match(r"^(?:\*\*)?objetivo(?:\*\*)?\s*:\s*(.+)$", s, re.IGNORECASE)
+        if m_obj and not objetivo:
+            objetivo = m_obj.group(1).strip()
+            continue
+
+        # Encabezados de sección secundaria (## ⚠️ Muy importante / ## ✅ Comprobación final)
+        if re.match(r"^#{2,3}\s+", s):
+            enc_norm = normalizar(re.sub(r"^#{2,3}\s+", "", s))
+            if any(k in enc_norm for k in ("importante", "advertencia", "clave", "atencion", "nota", "cuidado")):
+                seccion_actual = "importante"
+                continue
+            if any(k in enc_norm for k in ("comprobacion", "verificar", "verificacion", "resultado", "cierre final")):
+                seccion_actual = "comprobacion"
+                continue
+
+            # ¿Es un encabezado tipo "### Paso 1: Acceso"?
+            m_h_paso = re.match(r"^#{2,3}\s*paso\s*(\d{1,2})\s*[:\-–—.]?\s*(.*)$", s, re.IGNORECASE)
+            if m_h_paso:
+                seccion_actual = "pasos"
+                pasos.append({
+                    "num": int(m_h_paso.group(1)),
+                    "titulo": html.escape(re.sub(r"\*\*(.+?)\*\*", r"\1", m_h_paso.group(2).strip())),
+                    "cuerpo": "",
+                    "subs": [],
+                })
+                continue
+
+        # Paso numerado: "1. ...", "1) ...", "**Paso 1:** ..."
+        m_num = re.match(r"^(?:(?:\*\*)?paso\s+)?(\d{1,2})[.):\-]\s*(.+)$", s, re.IGNORECASE)
+        if m_num and seccion_actual == "pasos":
+            num_p = int(m_num.group(1))
+            resto_p = re.sub(r"^\*\*\s*", "", m_num.group(2)) if s.lower().startswith("**paso") else m_num.group(2)
+            tit_p, cuerpo_p = _separar_titulo_y_cuerpo_paso(resto_p)
+            pasos.append({
+                "num": num_p,
+                "titulo": tit_p,
+                "cuerpo": cuerpo_p,
+                "subs": [],
+            })
+            continue
+
+        # Viñetas (- ..., • ..., * ...)
+        if re.match(r"^[-•*▪▸]\s+", s):
+            item_limpio = re.sub(r"^[-•*▪▸]\s+", "", s).strip()
+            decorado = _decorar_linea_rica_ia(item_limpio)
+            if seccion_actual == "importante":
+                notas_importantes.append(decorado)
+            elif seccion_actual == "comprobacion":
+                comprobaciones.append(decorado)
+            elif pasos:
+                pasos[-1]["subs"].append(decorado)
+            else:
+                bloques_libres.append(decorado)
+            continue
+
+        # Texto adicional perteneciente a la sección activa
+        decorado_ln = _decorar_linea_rica_ia(s)
+        if seccion_actual == "importante":
+            notas_importantes.append(decorado_ln)
+        elif seccion_actual == "comprobacion":
+            comprobaciones.append(decorado_ln)
+        elif pasos:
+            if not pasos[-1]["cuerpo"]:
+                pasos[-1]["cuerpo"] = decorado_ln
+            else:
+                pasos[-1]["subs"].append(decorado_ln)
+        else:
+            bloques_libres.append(decorado_ln)
+
+    titulo_final = html.escape(titulo_manual or titulo_respaldo)
+    etiqueta_prov = html.escape(proveedor_ia or "IA")
+
+    partes_html: List[str] = []
+
+    # 1. Cabecera Azul Real / Índigo con tipografía grande y limpia
+    partes_html.append(
+        '<table width="100%" cellpadding="14" cellspacing="0" bgcolor="#1E3A8A" '
+        'style="border:2px solid #2563EB; margin-bottom:8px;">'
+        "<tr><td>"
+        f'<div style="font-family:{FUENTE_UI}; font-size:11px; font-weight:bold; '
+        'color:#BFDBFE; letter-spacing:0.4px; margin-bottom:4px;">'
+        f"✨ GUÍA PASO A PASO · ELABORADA CON {etiqueta_prov.upper()}"
+        "</div>"
+        f'<div style="font-family:{FUENTE_UI}; font-size:17px; font-weight:bold; '
+        'color:#FFFFFF; line-height:1.3;">'
+        f"📘 {titulo_final}"
+        "</div>"
+        "</td></tr></table>"
+    )
+
+    # 2. Franja Azul Cielo con el Objetivo
+    if objetivo:
+        partes_html.append(
+            '<table width="100%" cellpadding="10" cellspacing="0" bgcolor="#EFF6FF" '
+            'style="border:1px solid #93C5FD; border-left:5px solid #0284C7; margin-bottom:10px;">'
+            "<tr><td>"
+            f'<div style="font-family:{FUENTE_UI}; font-size:13px; color:#0C4A6E; line-height:1.45;">'
+            f'<b style="color:#0369A1;">🎯 Objetivo:</b> {_decorar_linea_rica_ia(objetivo)}'
+            "</div>"
+            "</td></tr></table>"
         )
 
-        if esc.startswith("### "):
-            lineas_out.append(
-                f'<div style="margin:8px 0 3px 0; font-size:13px; font-weight:bold; color:#0F172A;">{esc[4:]}</div>'
+    # Texto introductorio libre (si lo hubiera)
+    if bloques_libres:
+        intro_html = "".join(
+            f'<div style="font-family:{FUENTE_UI}; font-size:13.5px; color:#1E293B; '
+            f'margin:4px 0; line-height:1.5;">{ln}</div>'
+            for ln in bloques_libres
+        )
+        partes_html.append(
+            '<table width="100%" cellpadding="10" cellspacing="0" bgcolor="#FFFFFF" '
+            'style="border:1px solid #E2E8F0; margin-bottom:8px;">'
+            f"<tr><td>{intro_html}</td></tr></table>"
+        )
+
+    # 3. Tarjetas numeradas en colores (PASO 1, PASO 2, PASO 3...)
+    for idx_p, p in enumerate(pasos, 1):
+        num_mostrar = p["num"] if p["num"] > 0 else idx_p
+        partes_html.append(
+            _html_tarjeta_paso(
+                num_paso=num_mostrar,
+                titulo_paso=p["titulo"],
+                cuerpo_html=p["cuerpo"],
+                subpuntos_html=p["subs"],
             )
-        elif esc.startswith("## "):
-            lineas_out.append(
-                f'<div style="margin:8px 0 4px 0; font-size:14px; font-weight:bold; color:#162B4D;">{esc[3:]}</div>'
-            )
-        elif esc.startswith("# "):
-            lineas_out.append(
-                f'<div style="margin:8px 0 4px 0; font-size:14.5px; font-weight:bold; color:#162B4D;">{esc[2:]}</div>'
-            )
-        elif re.match(r"^\d{1,2}[.)]\s+", esc):
-            m = re.match(r"^(\d{1,2}[.)])\s+(.*)$", esc)
-            if m:
-                lineas_out.append(
-                    f'<div style="margin:4px 0 4px 8px;">'
-                    f'<b style="color:#0F766E;">{m.group(1)}</b> {m.group(2)}</div>'
+        )
+
+    # 4. Caja Ámbar Dorada para Puntos Importantes / Advertencias
+    if notas_importantes:
+        items_imp = "".join(
+            f'<div style="font-family:{FUENTE_UI}; font-size:13px; color:#78350F; '
+            f'margin:4px 0; line-height:1.45;">'
+            f'<span style="color:#D97706; font-weight:bold;">🔸</span> {ni}</div>'
+            for ni in notas_importantes
+        )
+        partes_html.append(
+            '<table width="100%" cellpadding="11" cellspacing="0" bgcolor="#FFFBEB" '
+            'style="border:1px solid #FCD34D; border-left:5px solid #F59E0B; margin-bottom:8px;">'
+            "<tr><td>"
+            f'<div style="font-family:{FUENTE_UI}; font-size:13.5px; font-weight:bold; '
+            'color:#B45309; margin-bottom:4px;">⚠️ Muy importante a tener en cuenta</div>'
+            f"{items_imp}"
+            "</td></tr></table>"
+        )
+
+    # 5. Caja Verde Esmeralda para Comprobación Final
+    if comprobaciones:
+        items_ok = "".join(
+            f'<div style="font-family:{FUENTE_UI}; font-size:13px; color:#065F46; '
+            f'margin:4px 0; line-height:1.45;">'
+            f'<span style="color:#059669; font-weight:bold;">✔</span> {co}</div>'
+            for co in comprobaciones
+        )
+        partes_html.append(
+            '<table width="100%" cellpadding="11" cellspacing="0" bgcolor="#ECFDF5" '
+            'style="border:1px solid #6EE7B7; border-left:5px solid #10B981; margin-bottom:8px;">'
+            "<tr><td>"
+            f'<div style="font-family:{FUENTE_UI}; font-size:13.5px; font-weight:bold; '
+            'color:#047857; margin-bottom:4px;">✅ Comprobación final</div>'
+            f"{items_ok}"
+            "</td></tr></table>"
+        )
+
+    return "".join(partes_html)
+
+
+def formatear_bloque_manual_html(texto: str, terminos: Sequence[str]) -> str:
+    """Formateador visual en colores también para el modo local (sin IA)."""
+    lineas_html: List[str] = []
+    contador_auto = 0
+    for linea in (texto or "").splitlines():
+        s = linea.strip()
+        if not s:
+            lineas_html.append('<div style="height:4px;"></div>')
+            continue
+
+        m_num = re.match(r"^(\d{1,2})[.)\-]\s+(.*)$", s)
+        if m_num:
+            num_p = int(m_num.group(1))
+            resto = resaltar_terminos_html(m_num.group(2), terminos)
+            lineas_html.append(
+                _html_tarjeta_paso(
+                    num_paso=num_p,
+                    titulo_paso="",
+                    cuerpo_html=resto,
+                    subpuntos_html=[],
                 )
-            else:
-                lineas_out.append(f'<div style="margin:2px 0;">{esc}</div>')
-        elif re.match(r"^[-•*]\s+", esc):
-            cuerpo = re.sub(r"^[-•*]\s+", "", esc)
-            lineas_out.append(
-                f'<div style="margin:3px 0 3px 10px;">'
-                f'<span style="color:#0F766E; font-weight:bold;">•</span> {cuerpo}</div>'
+            )
+        elif re.match(r"^(nota|importante|atenci[oó]n|ojo|aviso)\s*:", s, re.IGNORECASE):
+            lineas_html.append(
+                f'<table width="100%" cellpadding="8" cellspacing="0" bgcolor="#FFFBEB" '
+                f'style="border:1px solid #FCD34D; border-left:4px solid #F59E0B; margin:5px 0;">'
+                f'<tr><td style="font-family:{FUENTE_UI}; font-size:13px; color:#92400E;">'
+                f"⚠️ {resaltar_terminos_html(s, terminos)}</td></tr></table>"
+            )
+        elif re.match(r"^[-•*▪▸]\s+", s):
+            contador_auto += 1
+            cuerpo_v = resaltar_terminos_html(re.sub(r"^[-•*▪▸]\s+", "", s), terminos)
+            lineas_html.append(
+                f'<div style="margin:4px 0 4px 8px; font-family:{FUENTE_UI}; '
+                f'font-size:13.5px; color:#1E293B; line-height:1.48;">'
+                f'<span style="color:#2563EB; font-weight:bold;">➜</span> {cuerpo_v}</div>'
             )
         else:
-            lineas_out.append(f'<div style="margin:3px 0;">{esc}</div>')
+            lineas_html.append(
+                f'<div style="margin:3px 0; font-family:{FUENTE_UI}; font-size:13.5px; '
+                f'color:#1E293B; line-height:1.48;">{resaltar_terminos_html(s, terminos)}</div>'
+            )
 
-    return "".join(lineas_out)
+    return "".join(lineas_html)
 
 
 def _html_cartel_no_disponible(respuesta: RespuestaAsistente) -> str:
@@ -1414,13 +2075,14 @@ def _html_cartel_no_disponible(respuesta: RespuestaAsistente) -> str:
         '<table width="100%" cellpadding="14" cellspacing="0" bgcolor="#FEF2F2" '
         'style="border:2px solid #F87171; margin-bottom:6px;">'
         "<tr><td>"
-        '<div style="font-size:14px; font-weight:bold; color:#991B1B; margin-bottom:4px;">'
+        f'<div style="font-family:{FUENTE_UI}; font-size:14.5px; font-weight:bold; '
+        'color:#991B1B; margin-bottom:4px;">'
         "🚫 PROCEDIMIENTO NO DISPONIBLE"
         "</div>"
-        f'<div style="font-size:13px; color:#7F1D1D; margin-bottom:5px;">'
+        f'<div style="font-family:{FUENTE_UI}; font-size:13px; color:#7F1D1D; margin-bottom:5px;">'
         f"Sin manual disponible para: <b>«{consulta_esc}»</b>."
         "</div>"
-        f'<div style="font-size:12px; color:#991B1B;">{sub}</div>'
+        f'<div style="font-family:{FUENTE_UI}; font-size:12.5px; color:#991B1B;">{sub}</div>'
         "</td></tr></table>"
     )
 
@@ -1432,165 +2094,167 @@ def renderizar_respuesta_asistente_html(
     if not respuesta.tiene_contenido:
         return _html_cartel_no_disponible(respuesta)
 
-    # Caso especial: el manual SÍ está en Conocimiento por su título exacto, pero es un PDF
-    # escaneado / de puras imágenes sin texto OCR extraído en biblioteca.db.
-    if respuesta.solo_documento_sin_ocr:
-        tarjetas_ocr: List[str] = []
-        for pasaje in respuesta.pasajes:
-            icono = ICONOS_DOC.get(pasaje.tipo_documento, "📕 PDF")
-            tarjetas_ocr.append(
-                '<table width="100%" cellpadding="12" cellspacing="0" bgcolor="#FFFBEB" '
-                'style="border:2px solid #F59E0B; margin-bottom:8px;">'
-                "<tr><td>"
-                '<div style="font-size:13.5px; font-weight:bold; color:#92400E; margin-bottom:4px;">'
-                f"📄 Manual localizado: {html.escape(pasaje.titulo_documento)}"
-                "</div>"
-                '<div style="font-size:12.5px; color:#78350F; line-height:1.45; margin-bottom:8px;">'
-                f"Este archivo ({icono}) está en tu biblioteca, pero sus páginas están guardadas como "
-                "<b>imágenes/capturas sin texto legible</b> para el buscador. Puedes abrirlo directamente "
-                "aquí debajo, o ir a <b>📚 Conocimiento → 🔄 Releer todo (con imágenes)</b> para extraer "
-                "el texto de sus capturas."
-                "</div>"
-                f'<a href="abrir:{pasaje.doc_id}" '
-                'style="color:#1D4ED8; font-weight:bold; text-decoration:none; font-size:13px;">'
-                "📂 Abrir manual original</a>"
-                "</td></tr></table>"
-            )
-        return "".join(tarjetas_ocr)
-
-    bloques: List[str] = []
-
+    # Mientras la IA lee el PDF/capturas y redacta la guía paso a paso en colores
     if pensando_ia:
+        leyendo_visual = bool(respuesta.adjuntos_ia)
+        detalle_carga = (
+            "Analizando las páginas y capturas del documento para escribirte todos los pasos claros…"
+            if leyendo_visual
+            else "Transformando el documento de tu biblioteca en una guía clara y ordenada…"
+        )
         return (
-            '<table width="100%" cellpadding="12" cellspacing="0" bgcolor="#F0FDFA" '
-            'style="border:1px solid #5EEAD4; margin-bottom:8px;">'
-            '<tr><td style="color:#0F766E; font-size:13px;">'
-            "<b>🤖 Redactando manual paso a paso desde tu biblioteca…</b>"
-            "</td></tr></table>"
-        )
-
-    if respuesta.texto_ia:
-        cuerpo_ia = formatear_markdown_ia_html(respuesta.texto_ia)
-        etiqueta_prov = html.escape(respuesta.proveedor_ia or "IA")
-        bloques.append(
-            '<table width="100%" cellpadding="12" cellspacing="0" bgcolor="#F8FAFC" '
-            'style="border:1px solid #99F6E4; margin-bottom:8px;">'
+            '<table width="100%" cellpadding="14" cellspacing="0" bgcolor="#EFF6FF" '
+            'style="border:2px solid #60A5FA; margin-bottom:8px;">'
             "<tr><td>"
-            '<div style="color:#0F766E; font-size:11.5px; font-weight:bold; '
-            'letter-spacing:0.3px; margin-bottom:6px;">'
-            f"📘 MANUAL OPERATIVO PASO A PASO ({etiqueta_prov})"
+            f'<div style="font-family:{FUENTE_UI}; color:#1E3A8A; font-size:14px; '
+            'font-weight:bold; margin-bottom:3px;">'
+            "🎨 Creando tu manual paso a paso en colores con IA…"
             "</div>"
-            f'<div style="color:#0F172A; font-size:13px; line-height:1.48; '
-            f'background-color:#FFFFFF; padding:10px 12px; border:1px solid #E2E8F0;">'
-            f"{cuerpo_ia}</div>"
+            f'<div style="font-family:{FUENTE_UI}; color:#1D4ED8; font-size:12.5px;">'
+            f"{detalle_carga}"
+            "</div>"
             "</td></tr></table>"
         )
 
+    # 1) MODO PROTAGONISTA: Manual paso a paso escrito con IA (letra bonita y colores)
+    if respuesta.texto_ia:
+        titulo_def = f"Manual paso a paso: {respuesta.pregunta.strip()}"
+        manual_colores = formatear_markdown_ia_html(
+            respuesta.texto_ia,
+            titulo_respaldo=titulo_def,
+            proveedor_ia=respuesta.proveedor_ia or "IA",
+        )
+        bloques_ia = [manual_colores]
+
+        # Pie discreto de una sola línea por si algún día se quiere consultar el archivo raíz
         if respuesta.pasajes:
             vistos = set()
-            enlaces_fuentes: List[str] = []
+            enlaces_discretos: List[str] = []
             for pasaje in respuesta.pasajes:
                 if pasaje.doc_id in vistos:
                     continue
                 vistos.add(pasaje.doc_id)
-                icono = ICONOS_DOC.get(pasaje.tipo_documento, "📄")
-                sec = f" ({html.escape(pasaje.titulo_seccion)})" if pasaje.titulo_seccion else ""
-                enlaces_fuentes.append(
-                    f'<div style="margin:2px 0; font-size:12px; color:#334155;">'
-                    f'{icono}: <b>{html.escape(pasaje.titulo_documento)}</b>{sec} — '
-                    f'<a href="abrir:{pasaje.doc_id}" '
-                    f'style="color:#1D4ED8; font-weight:bold; text-decoration:none;">'
-                    f"📂 Abrir manual original</a></div>"
+                enlaces_discretos.append(
+                    f'<span style="color:#475569;">{html.escape(pasaje.titulo_documento)}</span> '
+                    f'(<a href="abrir:{pasaje.doc_id}" '
+                    f'style="color:#2563EB; text-decoration:none; font-weight:bold;">'
+                    f"ver archivo base</a>)"
                 )
+            bloques_ia.append(
+                '<table width="100%" cellpadding="7" cellspacing="0" bgcolor="#F8FAFC" '
+                'style="border:1px solid #E2E8F0; margin-top:2px;">'
+                f'<tr><td style="font-family:{FUENTE_UI}; font-size:11.5px; color:#64748B;">'
+                f'📎 Basado en: {" · ".join(enlaces_discretos)}'
+                "</td></tr></table>"
+            )
+        return "".join(bloques_ia)
+
+    bloques: List[str] = []
+
+    if respuesta.aviso_ia:
+        bloques.append(
+            '<table width="100%" cellpadding="9" cellspacing="0" bgcolor="#FFFBEB" '
+            'style="border:1px solid #FCD34D; border-left:4px solid #F59E0B; margin-bottom:8px;">'
+            f'<tr><td style="font-family:{FUENTE_UI}; color:#92400E; font-size:12px;">'
+            f"ℹ️ {html.escape(respuesta.aviso_ia)}</td></tr></table>"
+        )
+
+    # Caso sin IA disponible cuando el PDF es 100 % imagen sin texto OCR
+    if respuesta.solo_documento_sin_ocr:
+        for pasaje in respuesta.pasajes:
+            icono = ICONOS_DOC.get(pasaje.tipo_documento, "📕 PDF")
             bloques.append(
-                '<table width="100%" cellpadding="8" cellspacing="0" bgcolor="#F1F5F9" '
-                'style="border:1px solid #CBD5E1; margin-bottom:6px;">'
+                '<table width="100%" cellpadding="12" cellspacing="0" bgcolor="#FFFBEB" '
+                'style="border:2px solid #F59E0B; margin-bottom:8px;">'
                 "<tr><td>"
-                f'{"".join(enlaces_fuentes)}'
+                f'<div style="font-family:{FUENTE_UI}; font-size:14px; font-weight:bold; '
+                'color:#92400E; margin-bottom:4px;">'
+                f"📄 Manual localizado: {html.escape(pasaje.titulo_documento)}"
+                "</div>"
+                f'<div style="font-family:{FUENTE_UI}; font-size:12.5px; color:#78350F; '
+                'line-height:1.45; margin-bottom:8px;">'
+                f"Este archivo ({icono}) contiene los pasos en <b>imágenes/capturas</b>. "
+                "Activa la casilla <b>✨ Redactar con IA</b> (con clave activa en <code>.env</code>) "
+                "para que la IA lea las capturas y te escriba aquí el manual paso a paso en colores, "
+                "o ábrelo directamente:"
+                "</div>"
+                f'<a href="abrir:{pasaje.doc_id}" '
+                f'style="font-family:{FUENTE_UI}; color:#1D4ED8; font-weight:bold; '
+                'text-decoration:none; font-size:13px;">'
+                "📂 Abrir manual original</a>"
                 "</td></tr></table>"
             )
         return "".join(bloques)
 
-    if respuesta.aviso_ia:
-        bloques.append(
-            '<table width="100%" cellpadding="7" cellspacing="0" bgcolor="#FFFBEB" '
-            'style="border:1px solid #FDE68A; margin-bottom:8px;">'
-            f'<tr><td style="color:#92400E; font-size:11.5px;">'
-            f"ℹ️ {html.escape(respuesta.aviso_ia)}</td></tr></table>"
-        )
-
     if respuesta.procedimiento is not None:
         p = respuesta.procedimiento
-        partes_p = [
-            '<div style="color:#15803D; font-size:12px; font-weight:bold; margin-bottom:4px;">'
-            "✅ PROCEDIMIENTO CONFIRMADO</div>",
-            f'<div style="font-size:14px; font-weight:bold; color:#0F172A; margin-bottom:4px;">'
-            f"{html.escape(p.titulo)}</div>",
-        ]
-        if p.objetivo:
-            partes_p.append(
-                f'<div style="color:#334155; margin-bottom:6px;"><i>{html.escape(p.objetivo)}</i></div>'
-            )
-        if p.pasos:
-            partes_p.append('<div style="font-weight:bold; color:#0F172A; margin-top:4px;">Pasos:</div>')
-            for i, paso in enumerate(p.pasos, 1):
-                partes_p.append(
-                    f'<div style="margin:3px 0 3px 8px;">'
-                    f'<b style="color:#15803D;">{i}.</b> {resaltar_terminos_html(paso, respuesta.terminos)}</div>'
-                )
-        if p.comprobaciones:
-            partes_p.append('<div style="font-weight:bold; color:#0F172A; margin-top:6px;">Comprobaciones:</div>')
-            for comp in p.comprobaciones:
-                partes_p.append(
-                    f'<div style="margin:2px 0 2px 10px;"><span style="color:#15803D;">✓</span> '
-                    f"{resaltar_terminos_html(comp, respuesta.terminos)}</div>"
-                )
-        if p.advertencias:
-            partes_p.append('<div style="font-weight:bold; color:#B45309; margin-top:6px;">⚠ Ten en cuenta:</div>')
-            for adv in p.advertencias:
-                partes_p.append(
-                    f'<div style="margin:2px 0 2px 10px; color:#92400E;">• '
-                    f"{resaltar_terminos_html(adv, respuesta.terminos)}</div>"
-                )
-
         bloques.append(
-            '<table width="100%" cellpadding="10" cellspacing="0" bgcolor="#F0FDF4" '
-            'style="border:1px solid #86EFAC; margin-bottom:10px;">'
-            f'<tr><td style="font-size:13px;">{"".join(partes_p)}</td></tr></table>'
+            '<table width="100%" cellpadding="12" cellspacing="0" bgcolor="#15803D" '
+            'style="border:2px solid #16A34A; margin-bottom:8px;">'
+            "<tr><td>"
+            f'<div style="font-family:{FUENTE_UI}; color:#DCFCE7; font-size:11px; '
+            'font-weight:bold; margin-bottom:3px;">✅ PROCEDIMIENTO CONFIRMADO</div>'
+            f'<div style="font-family:{FUENTE_UI}; font-size:16px; font-weight:bold; '
+            f'color:#FFFFFF;">{html.escape(p.titulo)}</div>'
+            "</td></tr></table>"
         )
+        if p.objetivo:
+            bloques.append(
+                '<table width="100%" cellpadding="9" cellspacing="0" bgcolor="#F0FDF4" '
+                'style="border:1px solid #86EFAC; border-left:4px solid #16A34A; margin-bottom:8px;">'
+                f'<tr><td style="font-family:{FUENTE_UI}; font-size:13px; color:#14532D;">'
+                f"<b>🎯 Objetivo:</b> {html.escape(p.objetivo)}</td></tr></table>"
+            )
+        for i, paso in enumerate(p.pasos, 1):
+            bloques.append(
+                _html_tarjeta_paso(
+                    num_paso=i,
+                    titulo_paso="",
+                    cuerpo_html=resaltar_terminos_html(paso, respuesta.terminos),
+                    subpuntos_html=[],
+                )
+            )
+        if p.advertencias:
+            adv_html = "".join(
+                f'<div style="font-family:{FUENTE_UI}; font-size:13px; color:#78350F; margin:3px 0;">'
+                f"🔸 {resaltar_terminos_html(adv, respuesta.terminos)}</div>"
+                for adv in p.advertencias
+            )
+            bloques.append(
+                '<table width="100%" cellpadding="10" cellspacing="0" bgcolor="#FFFBEB" '
+                'style="border:1px solid #FCD34D; border-left:5px solid #F59E0B; margin-bottom:8px;">'
+                f'<tr><td><div style="font-family:{FUENTE_UI}; font-weight:bold; color:#B45309; '
+                f'margin-bottom:4px;">⚠️ Muy importante</div>{adv_html}</td></tr></table>'
+            )
 
     if respuesta.pasajes:
+        titulo_cab = html.escape(respuesta.pasajes[0].titulo_documento)
+        bloques.append(
+            '<table width="100%" cellpadding="12" cellspacing="0" bgcolor="#1E3A8A" '
+            'style="border:2px solid #2563EB; margin-bottom:8px;">'
+            "<tr><td>"
+            f'<div style="font-family:{FUENTE_UI}; color:#BFDBFE; font-size:11px; '
+            'font-weight:bold; margin-bottom:3px;">📘 GUÍA EXTRAÍDA DE TU BIBLIOTECA</div>'
+            f'<div style="font-family:{FUENTE_UI}; font-size:16px; font-weight:bold; '
+            f'color:#FFFFFF;">{titulo_cab}</div>'
+            "</td></tr></table>"
+        )
         for pasaje in respuesta.pasajes:
-            icono = ICONOS_DOC.get(pasaje.tipo_documento, "📄 Manual")
-            detalles = [icono]
-            if pasaje.fecha:
-                detalles.append(f"Fecha: {html.escape(pasaje.fecha)}")
-            if pasaje.categoria:
-                detalles.append(html.escape(pasaje.categoria))
-            linea_meta = " · ".join(detalles)
             sub_sec = (
-                f'<div style="color:#1D4ED8; font-weight:bold; font-size:12.5px; margin:4px 0;">'
-                f"📌 {html.escape(pasaje.titulo_seccion)}</div>"
+                f'<div style="font-family:{FUENTE_UI}; color:#1D4ED8; font-weight:bold; '
+                f'font-size:13.5px; margin:6px 0 4px 0;">📌 {html.escape(pasaje.titulo_seccion)}</div>'
                 if pasaje.titulo_seccion
                 else ""
             )
             cuerpo_html = formatear_bloque_manual_html(pasaje.texto_seccion, respuesta.terminos)
-
             bloques.append(
-                '<table width="100%" cellpadding="10" cellspacing="0" bgcolor="#F8FAFC" '
-                'style="border:1px solid #CBD5E1; margin-bottom:8px;">'
-                "<tr><td>"
-                f'<div style="font-size:13px; font-weight:bold; color:#0F172A;">'
-                f"{html.escape(pasaje.titulo_documento)}</div>"
-                f'<div style="font-size:11px; color:#64748B; margin-bottom:5px;">{linea_meta}</div>'
-                f"{sub_sec}"
-                f'<div style="font-size:12.5px; color:#1E293B; line-height:1.45; '
-                f'background-color:#FFFFFF; padding:8px 10px; border:1px solid #E2E8F0;">'
-                f"{cuerpo_html}</div>"
-                f'<div style="margin-top:6px;">'
+                '<table width="100%" cellpadding="10" cellspacing="0" bgcolor="#FFFFFF" '
+                'style="border:1px solid #DBEAFE; margin-bottom:8px;">'
+                f"<tr><td>{sub_sec}{cuerpo_html}"
+                f'<div style="margin-top:6px; font-family:{FUENTE_UI}; font-size:11.5px;">'
                 f'<a href="abrir:{pasaje.doc_id}" '
-                f'style="color:#1D4ED8; font-weight:bold; text-decoration:none; font-size:12px;">'
-                f"📂 Abrir manual original</a></div>"
+                f'style="color:#2563EB; font-weight:bold; text-decoration:none;">'
+                f"📎 Ver archivo original</a></div>"
                 "</td></tr></table>"
             )
 

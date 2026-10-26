@@ -34,11 +34,14 @@ from PySide6.QtWidgets import (
 )
 
 from modulos.asistente_inicio import (
+    AdjuntoIA,
     MARCA_NO_DISPONIBLE,
     RespuestaAsistente,
     construir_contexto_rag,
     consultar_base_local,
     detectar_proveedor_ia,
+    guardar_cache_manual_ia,
+    leer_cache_manual_ia,
     renderizar_respuesta_asistente_html,
     sintetizar_con_ia,
 )
@@ -162,6 +165,7 @@ class _TrabajadorIA(QThread):
         pregunta: str,
         contexto_rag: str,
         historial_previo: List[Tuple[str, str]],
+        adjuntos_ia: Optional[List[AdjuntoIA]] = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -169,12 +173,14 @@ class _TrabajadorIA(QThread):
         self.pregunta = pregunta
         self.contexto_rag = contexto_rag
         self.historial_previo = historial_previo
+        self.adjuntos_ia = list(adjuntos_ia or [])
 
     def run(self) -> None:
         texto_ia, proveedor, aviso = sintetizar_con_ia(
             self.pregunta,
             self.contexto_rag,
             self.historial_previo,
+            adjuntos_ia=self.adjuntos_ia,
         )
         self.resultado_listo.emit(self.turno_id, texto_ia, proveedor, aviso)
 
@@ -416,12 +422,26 @@ class Inicio(QWidget):
         self._contador_turnos += 1
         turno_id = self._contador_turnos
 
-        usar_ia = bool(
+        contexto_rag = construir_contexto_rag(respuesta) if respuesta.tiene_contenido else ""
+        tiene_material_ia = bool(
+            respuesta.adjuntos_ia
+            or (contexto_rag.strip() and not respuesta.solo_documento_sin_ocr)
+        )
+        ia_habilitada = bool(
             self.check_ia.isChecked()
             and detectar_proveedor_ia() is not None
             and respuesta.tiene_contenido
-            and not respuesta.solo_documento_sin_ocr
+            and tiene_material_ia
         )
+
+        # Si este mismo manual ya fue redactado por la IA antes, mostrarlo al instante (0 s)
+        usar_hilo_ia = False
+        if ia_habilitada:
+            cacheado = leer_cache_manual_ia(biblioteca, respuesta.clave_cache_ia)
+            if cacheado:
+                respuesta.texto_ia, respuesta.proveedor_ia = cacheado
+            else:
+                usar_hilo_ia = True
 
         # Historial breve para dar contexto a preguntas de continuación con IA
         historial_ia: List[Tuple[str, str]] = []
@@ -437,7 +457,7 @@ class Inicio(QWidget):
             turno_id=turno_id,
             pregunta=texto_pregunta,
             respuesta=respuesta,
-            pensando_ia=usar_ia,
+            pensando_ia=usar_hilo_ia,
         )
         self._turnos.append(turno)
 
@@ -445,13 +465,13 @@ class Inicio(QWidget):
         self._actualizar_indicador_estado()
         self._pintar_conversacion(ir_al_final=True)
 
-        if usar_ia:
-            contexto_rag = construir_contexto_rag(respuesta)
+        if usar_hilo_ia:
             hilo = _TrabajadorIA(
                 turno_id=turno_id,
                 pregunta=texto_pregunta,
                 contexto_rag=contexto_rag,
                 historial_previo=historial_ia,
+                adjuntos_ia=respuesta.adjuntos_ia,
                 parent=self,
             )
             hilo.resultado_listo.connect(self._al_terminar_ia)
@@ -468,6 +488,13 @@ class Inicio(QWidget):
                     turno.respuesta.texto_ia = ""
                 else:
                     turno.respuesta.texto_ia = texto_ia
+                    if texto_ia and not aviso:
+                        guardar_cache_manual_ia(
+                            self._obtener_biblioteca(),
+                            turno.respuesta.clave_cache_ia,
+                            texto_ia,
+                            proveedor,
+                        )
                 turno.respuesta.proveedor_ia = proveedor
                 turno.respuesta.aviso_ia = aviso
                 self._pintar_conversacion(ir_al_final=False)
