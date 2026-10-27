@@ -157,15 +157,24 @@ def main():
         ("reportlab", "reportlab"),
         ("selenium", "selenium"),
     ]
-    for modulo, paquete in mods:
+    # Menu Inicio con IA (26/10/2026). Sin estas, el chat/Hojas de Manual
+    # no arranca o pierde funciones, pero el resto de CineStock si funciona.
+    mods_ia = [
+        ("docx", "python-docx"),
+        ("pptx", "python-pptx"),
+        ("PIL", "Pillow"),
+        ("certifi", "certifi"),
+    ]
+    for modulo, paquete in mods + mods_ia:
         try:
             encontrado = importlib.util.find_spec(modulo) is not None
         except Exception:
             encontrado = False
         if encontrado:
             decir(OK, f"{paquete} instalado.")
-        elif paquete == "openai":
-            decir(AVISO, f"Falta {paquete} (solo afecta al asistente).")
+        elif paquete in ("openai", "python-docx", "python-pptx", "Pillow", "certifi"):
+            decir(AVISO, f"Falta {paquete} (el menu Inicio con IA puede fallar; "
+                         "el robot del ERP SI funciona).")
         else:
             decir(FALTA, f"Falta {paquete}. Instala con: python -m pip install -r requirements.txt")
     try:
@@ -241,11 +250,35 @@ def main():
     print()
     print("8) ARCHIVOS DE ARRANQUE")
     for nombre in ("src/main.py", "src/receptor.py", "src/catalogo_erp.py",
-                   "herramientas/arrancar_cinestock.bat"):
+                   "herramientas/arrancar_cinestock.bat",
+                   "herramientas/_buscar_python.bat"):
         if (BASE / nombre).is_file():
             decir(OK, nombre)
         else:
             decir(FALTA, f"Falta {nombre}. Trae la rama.")
+
+    # ---- 9. Menu Inicio con IA (26/10/2026) ------------------------------
+    print()
+    print("9) MENU INICIO CON IA (chat + Hojas de Manual)")
+    ia = [
+        "src/modulos/asistente_inicio.py",
+        "src/modulos/depurador_biblioteca.py",
+        "src/modulos/conocimiento.py",
+        "src/ui/inicio.py",
+        "src/ui/conocimiento.py",
+    ]
+    if all((BASE / f).is_file() for f in ia):
+        decir(OK, "Los 5 archivos del asistente de IA estan presentes.")
+    else:
+        for f in ia:
+            if not (BASE / f).is_file():
+                decir(FALTA, f"Falta {f} (menu Inicio con IA).")
+    datos = SRC / "datos" / "conocimiento.json"
+    if datos.is_file():
+        decir(OK, "src/datos/conocimiento.json (procedimientos base).")
+    else:
+        decir(AVISO, "Falta src/datos/conocimiento.json; el chat arrancara "
+                     "sin procedimientos hasta que importes la biblioteca.")
 
     # ---- Resumen ---------------------------------------------------------
     separador("RESULTADO")

@@ -1,5 +1,12 @@
 # Guía para dejar CineStock funcionando en el PC DEL CINE
 
+> 🖥️ **¿En el cine ya hay CineStock instalado con WinPython?**
+> Entonces **NO sigas esta guía completa**. No hay que instalar ni clonar
+> nada: ve a **`docs/ACTUALIZACION_PC_CINE_HOY.md`** y usa el ZIP
+> `ACTUALIZACION_CINE.zip`, que incluye **los dos días**: el menú Inicio con
+> IA (26/10) y el robot v6c con las correcciones ERP (27/10).
+> Esta guía de aquí es para una **instalación desde cero**.
+
 **Fecha:** 27/10/2026 · **Rama:** `arena/67d0fffb-pedidos-conway` ·
 **Robot:** v6c · **Receptor:** puerto `8765`
 

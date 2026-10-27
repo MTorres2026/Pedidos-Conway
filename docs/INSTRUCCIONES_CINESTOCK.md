@@ -300,7 +300,11 @@ ya no existe). El robot **NO pulsa Guardar**; se revisa el informe antes.
 
 ## 7. En el PC DEL CINE
 
-👉 **Guía completa y paso a paso: `docs/INSTRUCCIONES_PC_CINE.md`.**
+👉 **Si ya hay WinPython instalado (caso real): `docs/ACTUALIZACION_PC_CINE_HOY.md`.**
+El ZIP `ACTUALIZACION_CINE.zip` lleva **los dos días**: menú Inicio con IA
+(26/10) + robot v6c y correcciones ERP (27/10). Solo copia archivos.
+
+👉 Instalación desde cero: `docs/INSTRUCCIONES_PC_CINE.md`.
 
 Resumen (todos los comandos dentro de la carpeta del proyecto):
 
