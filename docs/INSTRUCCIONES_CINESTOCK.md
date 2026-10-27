@@ -207,6 +207,43 @@ Lo de bajar la tapa fue exactamente lo que mató Chrome en la fila 33 del
 
 ---
 
+## 5 bis. ✅ Luz verde para el pedido de 100 líneas (27/10/2026, 17:47)
+
+Salida verificada de `python src\regenerar_pedido.py --restaurar`:
+
+* `v6b (la buena: anota el error y SIGUE)` en el comprobador.
+* Restaurados los DOS archivos desde `*.bak_20261027_171149`.
+* **Solo 3 líneas corregidas por archivo** (26 Bolsa Asa Papel, 28 Cuchara
+  Madera, 29 Tapa Vaso Mediana). `TOTAL: 6`.
+* Familias intactas: `Kit Kat (2): .../GBC, .../HSI`, `Skittle (2): .../HWC,
+  .../HWD`, `Estuchado (3)`, `Haribo (8)`. Es decir, las dos UM que se habían
+  estropeado por la mañana (`HSI` y `HWD`) están de vuelta.
+
+### Comando exacto para lanzar el pedido de 100 líneas
+
+Desde la **raíz del proyecto**, con el `.env` ya creado:
+
+```
+python src\robot_erp.py "data\pedidos_para_procesar\pedido_FLOW-1793107796283.json" --auto
+```
+
+Antes, comprobar que ese Python tiene selenium (debe decir `OK`):
+
+```
+python -c "import selenium, pandas; print('OK')"
+```
+
+Si no dice `OK`, lanzarlo desde CineStock → **Registro de Pedidos** → elegir
+el pedido → **📤 Enviar a ERP** (esa pantalla usa el Python del programa).
+**No usar la pestaña «Pedidos» para reenviar**: reconstruye el archivo desde
+lo que tenga en memoria y podría perder las correcciones.
+
+Al arrancar debe decir **`100 líneas a cargar`**. Incidencias esperadas en el
+informe: línea 26 (UM `ICG` pendiente de confirmar), línea 30 (Tapa Infantil,
+ya no existe). El robot **NO pulsa Guardar**; se revisa el informe antes.
+
+---
+
 ## 6. Después de la carrera
 
 1. El robot genera `src/errores_pedido_<fecha>.txt` y
