@@ -257,6 +257,15 @@ def main():
         else:
             decir(FALTA, f"Falta {nombre}. Trae la rama.")
 
+    # El vigilante del ID de Solicitud es OPCIONAL: robot_erp.py ya lo tiene
+    # dentro de un try/except. Pero si falta, es mejor avisar aqui.
+    vigilante = SRC / "robot_id_pedido.py"
+    if vigilante.is_file():
+        decir(OK, "src/robot_id_pedido.py (vigilante del ID de Solicitud).")
+    else:
+        decir(AVISO, "Falta src/robot_id_pedido.py. El robot seguira "
+                     "funcionando, pero no anotara el ID de Solicitud solo.")
+
     # ---- 9. Menu Inicio con IA (26/10/2026) ------------------------------
     print()
     print("9) MENU INICIO CON IA (chat + Hojas de Manual)")
