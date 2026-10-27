@@ -1,0 +1,25 @@
+# Dependencias de CineStock / robot ERP.
+# Instalar en el PC del cine con:
+#     python -m pip install -r requirements.txt
+# (No contiene credenciales. El archivo .env se crea A MANO y NUNCA se sube.)
+
+# Interfaz gráfica (ventana principal, catálogo, pedidos, registro)
+PySide6
+
+# Variables de entorno (.env con ERP_USER / ERP_PASS / OPENAI_API_KEY)
+python-dotenv
+
+# Asistente de procedimientos (opcional si no se usa, pero lo importa main.py)
+openai
+
+# Lectura de los pedidos (JSON/Excel/CSV) en el robot
+pandas
+openpyxl
+
+# PDFs de pedidos y granel
+pypdf
+reportlab
+
+# Robot del ERP (Chrome automatizado)
+selenium
+webdriver-manager

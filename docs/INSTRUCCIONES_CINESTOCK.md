@@ -300,18 +300,33 @@ ya no existe). El robot **NO pulsa Guardar**; se revisa el informe antes.
 
 ## 7. En el PC DEL CINE
 
-1. `git pull origin arena/67d0fffb-pedidos-conway`
-2. `python "src\comprobar version robot.py"` → debe decir **`v6b`**.
-3. Crear **a mano** su `.env` en la raíz del proyecto (NUNCA por Git):
+👉 **Guía completa y paso a paso: `docs/INSTRUCCIONES_PC_CINE.md`.**
+
+Resumen (todos los comandos dentro de la carpeta del proyecto):
 
 ```
-ERP_USER=el_usuario_de_aqui
-ERP_PASS=la_contraseña_de_aqui
+git fetch origin
+git checkout origin/arena/67d0fffb-pedidos-conway -- <lista de archivos de la guía>
+git reset
+python -m pip install -r requirements.txt
+python src\comprobar_instalacion.py
+herramientas\arrancar_cinestock.bat
 ```
 
-4. Copiar el catálogo local si procede: `data/supermaestro.json` está en
-   `.gitignore`, así que no viaja por Git. Las **correcciones ERP sí viajan**
-   porque están en `src/recursos/correcciones_erp.json`.
+Puntos clave:
+
+1. `python src\comprobar_version_robot.py` → debe decir **`v6c`**.
+2. Crear **a mano** su `.env` en la raíz (NUNCA por Git):
+   `ERP_USER`, `ERP_PASS` y, si procede, `OPENAI_API_KEY`.
+3. Copiar por USB `data/supermaestro.json` y `data/supermaestro_flow.json`:
+   `data/` está en `.gitignore` y no viaja por Git. Las **correcciones ERP sí
+   viajan** en `src/recursos/correcciones_erp.json`.
+4. `python src\comprobar_instalacion.py` debe acabar en **TODO OK**.
+5. Arrancar con `herramientas\arrancar_cinestock.bat`.
+   **NO usar `dist\CineStock\CineStock.exe`**: es una compilación antigua sin
+   los arreglos.
+6. Receptor en el puerto **8765**; comprobar `http://127.0.0.1:8765/ping` y
+   después desde el móvil con la IP del PC (misma wifi/VPN, firewall abierto).
 
 ---
 
