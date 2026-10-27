@@ -90,6 +90,12 @@ catálogo `GET /supermaestro` pueden cambiar una línea cuyo nombre contenga
 una de esas palabras. Es un seguro doble: aunque alguien vuelva a cargar el
 catálogo entero, esas UM no se tocan.
 
+> **Ortografía real del pedido (27/10/2026):** los productos se escriben
+> **`Fiesta Kojak Cereza` / `Fiesta Kojak Cola`**, con **una sola c**.
+> La lista incluye las dos grafías (`Kojak` y `Kojack`) para que las líneas
+> 72 y 73 queden blindadas. `src/verificar_pedido.py` lee esa misma lista
+> (una sola fuente de verdad) y las muestra en su salida.
+
 Además, al aplicar una corrección al catálogo solo se modifica la fila cuyo
 **nombre** coincide. Antes se modificaban *todas* las filas con el mismo
 `ID VISTA`, que es justo lo que estropeaba a los "hijos" de una familia.

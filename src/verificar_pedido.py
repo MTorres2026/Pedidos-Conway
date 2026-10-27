@@ -29,6 +29,13 @@ import sys
 import unicodedata
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+try:
+    # Una sola fuente de verdad: la lista de familias de correcciones_erp.json.
+    from catalogo_erp import familia_de as _familia_de
+except Exception:
+    _familia_de = None
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 PREDETERMINADO = BASE_DIR / "data" / "pedidos_para_procesar" / "pedido_FLOW-1793107796283.json"
 
@@ -124,11 +131,26 @@ def main():
 
     print()
     print("  Familias con variantes (sus UM NO deben cambiar):")
-    familias = ("Kit Kat", "Skittle", "Haribo", "Estuchado", "Helado", "Kojack")
+    # Si no se pudo importar catalogo_erp, se usa una lista de respaldo con
+    # las DOS grafias (en el pedido real se escribe «Kojak» con una sola c).
+    familias_respaldo = ("Kit Kat", "Skittle", "Haribo", "Estuchado",
+                         "Helado", "Kojak", "Kojack")
+
+    def _familia(desc):
+        if _familia_de is not None:
+            try:
+                return _familia_de(desc)
+            except Exception:
+                pass
+        for f in familias_respaldo:
+            if f.lower() in desc.lower():
+                return f
+        return None
+
     vistas = 0
     for n, fila in enumerate(lineas, 1):
         desc, _ = _elegir(fila, ALIAS_DESC)
-        if any(f.lower() in desc.lower() for f in familias):
+        if _familia(desc):
             art, _ = _elegir(fila, ALIAS_ARTICULO)
             um_real, _ = _elegir(fila, ALIAS_UM)
             print(f"    línea {n:>3} | {desc[:42]:<42} | {art:<10} / {um_real}")
