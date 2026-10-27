@@ -40,6 +40,18 @@ except ImportError:
 RUTA_BASE = os.path.dirname(os.path.abspath(__file__))
 
 # ===========================================================================
+# VERSIÓN DEL ROBOT
+#   v6b = la versión aprobada: ancla filas, bloques de 20, anota el error y SIGUE.
+#   v6c = v6b + DOS mejoras pedidas el 27/10/2026:
+#         1) El mensaje final Y la ventana flotante listan los PRODUCTOS CON
+#            ERROR junto a su CÓDIGO ERP, UM y descripción.
+#         2) Si el grid paginado no deja leer la descripción pero el código
+#            SÍ quedó escrito, NO se borra la línea (solo se avisa).
+#   NO es la v7. La base sigue siendo exactamente la v6b aprobada.
+# ===========================================================================
+VERSION_ROBOT = "v6c"
+
+# ===========================================================================
 # .env (ERP_USER / ERP_PASS) - LÓGICA CORREGIDA DE CARGA
 # ===========================================================================
 if load_dotenv is not None:
@@ -548,6 +560,32 @@ class Informe:
     def hay_errores(self):
         return bool(self.lineas or self.generales or self.fatal)
 
+    def resumen_productos_con_error(self):
+        """Lista COMPACTA de productos con error, con su CÓDIGO ERP.
+
+        Se usa en el mensaje final de la consola y en la VENTANA FLOTANTE,
+        para que la encargada vea de un vistazo QUÉ producto falla y con
+        QUÉ código, sin tener que abrir el informe .txt.
+        """
+        if not self.lineas:
+            return ""
+        L = [
+            "=" * 74,
+            "PRODUCTOS QUE HAN DADO ERROR (con su CÓDIGO ERP)",
+            "=" * 74,
+        ]
+        for n in sorted(self.lineas):
+            d = self.lineas[n]
+            codigo = str(d.get("articulo") or "").strip() or "(sin código)"
+            um = str(d.get("um") or "").strip() or "(sin UM)"
+            prod = str(d.get("producto") or "").strip() or "(sin descripción)"
+            L.append(f"  Fila {n:>3} | CODIGO ERP: {codigo} | UM: {um} | {prod}")
+            for p in d["problemas"][:2]:
+                L.append(f"           -> {p}")
+        L.append("=" * 74)
+        L.append(f"  Total: {len(self.lineas)} producto(s)/línea(s) con error.")
+        return "\n".join(L)
+
     def texto(self):
         malas = len(self.lineas)
         L = []
@@ -555,6 +593,9 @@ class Informe:
             L += ["EL PROGRAMA SE DETUVO ANTES DE TERMINAR:", f"   {self.fatal}", ""]
         L.append(f"RESULTADO: {self.total - malas} de {self.total} líneas sin incidencias, "
                  f"{malas} con problemas.")
+        resumen = self.resumen_productos_con_error()
+        if resumen:
+            L += ["", resumen]
         if self.generales:
             L += ["", "PROBLEMAS GENERALES (cabecera / sistema):"]
             L += [f"   - {g}" for g in self.generales]
@@ -1281,10 +1322,29 @@ def procesar_fila(driver, i, fila_datos, inf, n_pantalla, fila_dom=None):
     if desc:
         _DESC["fiable"] = True
     elif desc is not None and _DESC["fiable"]:
-        err("El ERP no reconoce el producto (no cargó su descripción)", "comprueba el código; la línea queda vacía")
-        print(f"      ¡El ERP no cargó la descripción de {art}! Fila {n} omitida y vaciada.")
-        vaciar()
-        return
+        # --- v6c -----------------------------------------------------------
+        # El grid paginado del ERP a veces no deja LEER la descripción aunque
+        # el artículo SÍ quedó escrito. En v6b eso hacía vaciar() la línea y
+        # se perdía un producto bueno (pasó en las líneas 93, 96, 98, 99 y
+        # 100 del test de 100 líneas). Ahora se comprueba el código: si sigue
+        # en su campo, se CONSERVA la línea y solo se avisa. Si el código no
+        # está, se mantiene el comportamiento anterior (vaciar y anotar).
+        try:
+            actual = leer_valor(driver, art_id) or ""
+        except Exception:
+            actual = ""
+        if actual and _iguales(actual, art):
+            err("No se pudo leer la descripción, pero el código SÍ quedó escrito",
+                "la línea se CONSERVA; revísala a mano antes de Guardar")
+            print(f"      [v6c] fila {n}: descripción no legible, pero {art} sigue "
+                  f"escrito. NO se borra la línea.")
+        else:
+            err("El ERP no reconoce el producto (no cargó su descripción)",
+                "comprueba el código; la línea queda vacía")
+            print(f"      ¡El ERP no cargó la descripción de {art}! Fila {n} omitida y vaciada.")
+            vaciar()
+            return
+        # --------------------------------------------------------------------
     t1 = time.time()
     ok_q = False
     _ULTIMO_AVISO["textos"] = []
@@ -2555,11 +2615,30 @@ def main():
         
     if inf.hay_errores:
         guardar_informe(inf, driver)
+        # v6c: inf.texto() ya incluye el resumen con CÓDIGOS ERP. Se imprime
+        # en la consola y, sobre todo, se pone AL PRINCIPIO de la ventana
+        # flotante para que sea lo primero que vea la encargada.
+        resumen = inf.resumen_productos_con_error()
         print("\n" + inf.texto())
-        
-        txt_error = (f"Se han cargado {len(datos) - len(inf.lineas)} líneas. Hay {len(inf.lineas)} incidencias.\n\n"
-                     "👉 IMPORTANTE: Ve a Chrome, revisa las líneas marcadas en el informe, corrígelas a mano y pulsa GUARDAR en el ERP.\n\n"
-                     "NO CIERRES ESTA VENTANA NI LA CONSOLA NEGRA. El robot se quedará esperando en segundo plano para leer el ID de Solicitud automáticamente en cuanto pulses Guardar.")
+        print("\n" + "=" * 74)
+        print("  MENSAJE FINAL: arriba tienes los PRODUCTOS CON ERROR")
+        print("  junto a su CÓDIGO ERP. La misma lista está en la ventana")
+        print("  flotante y en el informe .txt.")
+        print("=" * 74)
+
+        txt_error = (f"Se han cargado {len(datos) - len(inf.lineas)} líneas. "
+                     f"Hay {len(inf.lineas)} incidencias.\n\n"
+                     "👉 IMPORTANTE: Ve a Chrome, revisa las líneas marcadas, "
+                     "corrígelas a mano y pulsa GUARDAR en el ERP.\n\n"
+                     "NO CIERRES ESTA VENTANA NI LA CONSOLA NEGRA. El robot se "
+                     "quedará esperando para leer el ID de Solicitud en cuanto "
+                     "pulses Guardar.")
+        if resumen:
+            txt_error = (
+                "PRODUCTOS QUE HAN DADO ERROR (CÓDIGO ERP)\n"
+                "Revísalos en el ERP antes de Guardar:\n\n"
+                + resumen + "\n\n" + "-" * 74 + "\n\n" + txt_error
+            )
         mostrar_ventana("Pedido ERP - Revisión necesaria", txt_error, error=True)
     else:
         txt_ok = (f"¡Las {len(datos)} líneas se han cargado correctamente!\n\n"

@@ -428,7 +428,68 @@ líneas hay que retirar ese producto del catálogo de Flow/CineStock.
 
 ---
 
-## 10. Pendiente (mejora futura, tarea 6)
+## 10. v6c — el robot avisa qué PRODUCTOS fallan, con su CÓDIGO ERP
+
+A petición de la encargada, `src/robot_erp.py` pasa a **v6c**. **No es la v7**:
+es exactamente la **v6b aprobada** más tres cambios pequeños.
+
+1. **Mensaje final y ventana flotante** incluyen una lista
+   `PRODUCTOS QUE HAN DADO ERROR (con su CÓDIGO ERP)` con, para cada línea:
+   número de fila, **código ERP**, UM, descripción del producto y motivo.
+   Antes la ventana flotante solo decía «hay N incidencias» y había que abrir
+   el `.txt`. También aparece al principio del informe `errores_pedido_*.txt`.
+2. **No borra líneas buenas.** Cuando el grid paginado no deja leer la
+   descripción pero el código **sí quedó escrito**, la línea se CONSERVA y
+   solo se avisa. En v6b se vaciaba: por eso se perdieron las líneas 93, 96,
+   98, 99 y 100 del test (códigos correctos). Si el código NO quedó escrito,
+   se sigue vaciando como antes.
+3. `src/comprobar version robot.py` reconoce **v6c**.
+
+Ejemplo de lo que se ve ahora en la ventana flotante:
+
+```
+PRODUCTOS QUE HAN DADO ERROR (CÓDIGO ERP)
+==========================================================================
+  Fila  30 | CODIGO ERP: 1003020031 | UM: IDZ | (CI) Tapa Vaso Pequeña/Infantil
+           -> El ERP no reconoce el artículo (Valor no válido)
+  Fila  38 | CODIGO ERP: 1005010028 | UM: HUM | Piruleta Corazon
+           -> El ERP no reconoce el artículo (Valor no válido)
+==========================================================================
+```
+
+### Botón de deshacer
+
+Si prefieres volver a la **v6b exacta**, ejecuta:
+
+```
+python "src\devolver v6b.py"
+```
+
+Guarda antes tu v6c como `src/robot_erp.py.bak_v6c_<fecha>` y restaura la
+copia `src/recursos/robot_erp_v6b_original.py.txt`. Comprueba después con
+`python src\comprobar_version_robot.py`.
+
+> La **Tapa Infantil NO se filtra**: decidimos dejarla («LA DEJAMOS»). Ahora
+> aparecerá claramente en la lista de la ventana flotante con su código
+> `1003020031`, así siempre sabrás qué producto falta. Para el pedido real de
+> 146 lo limpio es retirar ese producto del catálogo de Flow/CineStock.
+
+### Un solo comando para traer TODO al PC
+
+En PowerShell, en la raíz del proyecto:
+
+```
+git fetch origin
+git checkout origin/arena/67d0fffb-pedidos-conway -- .gitignore src/robot_erp.py src/receptor.py src/ui/catalogo.py src/catalogo_erp.py src/recursos/correcciones_erp.json "src/recursos/robot_erp_v6b_original.py.txt" src/regenerar_pedido.py src/verificar_pedido.py "src/comprobar version robot.py" src/comprobar_version_robot.py "src/aplicar parche v5.py" "src/aplicar parche v6b.py" "src/devolver v6.py" "src/devolver v6b.py" docs/INSTRUCCIONES_CINESTOCK.md herramientas/copia_seguridad_local.bat
+git reset
+python src\comprobar_version_robot.py
+```
+
+Debe decir **`v6c`**.
+
+---
+
+## 11. Pendiente (mejora futura, tarea 6)
 
 Validar en CineStock, antes de pulsar «Enviar a ERP», que cada `idErp` y cada
 `umErp` existen en el catálogo y que el artículo no esté marcado como

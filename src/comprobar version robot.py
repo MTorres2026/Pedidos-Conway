@@ -10,6 +10,10 @@ RUTA = os.path.join(CARPETA, "robot_erp.py")
 def version_de(texto):
     if "_añadir_todas" in texto:
         return "v7 (la que guardamos de reserva)"
+    if 'VERSION_ROBOT = "v6c"' in texto:
+        return ("v6c (la buena: v6b + lista de PRODUCTOS CON ERROR con su "
+                "CODIGO ERP en el mensaje final y en la ventana flotante "
+                "+ no borra lineas buenas)")
     if "SIGUE con la siguiente" in texto:
         return "v6b (la buena: anota el error y SIGUE)"
     if "_mapear_ventana" in texto:
