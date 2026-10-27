@@ -67,7 +67,7 @@
       "UM ERP": "HYR",
       "ESTADO": "CONFIRMADO_ERP",
       "COINCIDENCIA": "POR_NOMBRE",
-      "NOTA / REGLA": "Verificado en el ERP el 27/10/2026 a las 19:17 (captura de la encargada, Búsqueda Art): 1001040022 / HYR = 'Fiesta Piruleta Corazon Caja 80 Piezas', categoria 100104, precio 10,40. El codigo que traia Flow (1005010028 / HUM) NO EXISTE y fue rechazado en la linea 38 de la carrera de las 18:55. No tiene ID VISTA conocido: se aplica comparando el NOMBRE del producto (COINCIDENCIA=POR_NOMBRE), nunca por ID VISTA."
+      "NOTA / REGLA": "Verificado en el ERP el 27/10/2026 a las 19:17 (captura de la encargada, Búsqueda Art): 1001040022 / HYR = 'Fiesta Piruleta Corazon Caja 80 Piezas', categoria 100104, precio 10,40. El codigo que traia Flow (1005010028 / HUM) NO EXISTE y fue rechazado en la linea 38 de la carrera de las 18:55. No tiene ID VISTA conocido: se aplica comparando el NOMBRE EXACTO del producto, nunca por ID VISTA. OJO VARIANTES: la encargada confirma que este producto TIENE 2 HIJOS (uno es AZUL), pero como solo se pide UNO no se mete en FAMILIAS_PROTEGIDAS. La coincidencia por nombre es ESTRICTA (mismas palabras): si algun dia aparece el hijo azul con otro nombre, NO se le aplicara esta correccion y habra que dar de alta su propio codigo/UM."
     },
 
     {

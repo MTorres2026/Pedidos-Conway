@@ -375,6 +375,16 @@ def _mismo_producto(a, b):
     return ta <= tb or tb <= ta
 
 
+def _mismo_nombre_exacto(a, b):
+    """Como _mismo_producto pero EXIGE las mismas palabras (sin admitir
+    nombres más largos). Se usa para correcciones POR_NOMBRE de artículos
+    que tienen variantes: así 'Piruleta Corazon' nunca corrige por error
+    al 'hijo azul' si algún día se pide con otro nombre.
+    """
+    ta, tb = _tokens(a), _tokens(b)
+    return bool(ta) and ta == tb
+
+
 def mejor_candidato(candidatos, descripcion):
     """De varias filas con el mismo ID VISTA, elige la que más se parece al
     nombre que trae el pedido (familias con variantes, p. ej. Haribo)."""
@@ -411,11 +421,14 @@ def aplicar_a_linea(linea, indice, por_nombre=None):
             por_nombre = correcciones_por_nombre()
         if not desc:
             return None
-        # Exigimos que TODAS las palabras del nombre de la corrección estén
-        # en la descripción (o viceversa). Así 'Carton Palomitas XXL' no
-        # corrige por error a 'Carton Palomitas Mediano'.
+        # Coincidencia ESTRICTA: exactamente las mismas palabras. Así
+        # 'Piruleta Corazon' no corrige por error a su hijo azul si algún
+        # día se pide con otro nombre, y 'Carton Palomitas XXL' no corrige
+        # a 'Carton Palomitas XXL Azul'. Si el nombre cambia, la corrección
+        # NO se aplica y el verificador lo avisará (fallo visible, no
+        # silencioso).
         coincidencias = [c for c in por_nombre
-                         if _mismo_producto(c.get("PRODUCTO", ""), desc)]
+                         if _mismo_nombre_exacto(c.get("PRODUCTO", ""), desc)]
         if len(coincidencias) != 1:
             return None  # 0 = no aplica; >1 = ambiguo, mejor no tocar
         mejor = coincidencias[0]

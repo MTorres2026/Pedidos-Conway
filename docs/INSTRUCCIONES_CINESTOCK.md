@@ -3,6 +3,13 @@
 > Documento de apoyo. La regla sigue siendo: **el robot NUNCA pulsa Guardar**.
 > Tú revisas el pedido en Chrome y guardas a mano.
 
+> 🧪 **ACLARACIÓN DE LA ENCARGADA (27/10/2026, 19:30):** el pedido de **100
+> líneas ES SOLO UNA PRUEBA DE DIAGNÓSTICO**, no un pedido real. Su única
+> finalidad es **detectar qué productos fallan en el ERP y qué hay que
+> cambiar**. No hay que corregir las líneas a mano ni pulsar Guardar en él;
+> se puede descartar. Lo que vale es su **informe**. El pedido real es el de
+> **146 líneas**, que se lanzará cuando el catálogo esté limpio.
+
 > ✅ **ESTADO DE LA SUBIDA (27/10/2026): COMPLETO.** En la rama
 > `arena/67d0fffb-pedidos-conway` están el robot **v6b** (el archivo exacto del
 > PC de la encargada, verificado con `comprobar version robot.py`), el catálogo
@@ -231,9 +238,17 @@ Salida verificada de `python src\regenerar_pedido.py --restaurar`:
 python src\verificar_pedido.py
 ```
 
-`src/verificar_pedido.py` es **solo de lectura**: confirma que hay 100 líneas,
-que las 3 correcciones están en el archivo, que la línea 30 sigue intacta y
-que las familias conservan sus UM. Debe acabar con **`RESULTADO: TODO OK`**.
+Para el **pedido real de 146 líneas** (u otro archivo), pásale la ruta y el
+nº de líneas:
+
+```
+python src\verificar_pedido.py "data\pedidos_para_procesar\pedido_146.json" --lineas 146
+```
+
+`src/verificar_pedido.py` es **solo de lectura**: busca las **5 correcciones por
+NOMBRE** (no por nº de línea, así sirve para cualquier pedido), comprueba el
+nº de líneas, que la Tapa Infantil sigue intacta y que las familias conservan
+sus UM. Debe acabar con **`RESULTADO: TODO OK`**.
 Si dice `PROBLEMA`, **no lances el robot**: ejecuta
 `python src\regenerar_pedido.py --restaurar` y vuelve a verificar.
 
@@ -395,6 +410,14 @@ Las **2 correcciones nuevas** se han añadido a
 `ID VISTA` conocido, se buscan comparando el nombre del producto).
 `src/verificar_pedido.py` ya comprueba las **5** correcciones (26, 28, 29,
 38, 43).
+
+**Sobre las variantes de Fiesta Piruleta Corazon:** la encargada confirma que
+tiene **2 hijos (uno azul)**, pero como **solo se pide uno**, **NO** se mete en
+`FAMILIAS_PROTEGIDAS`. Para que eso sea seguro, la corrección por nombre es
+**estricta**: exige exactamente las mismas palabras (`_mismo_nombre_exacto`).
+Si algún día aparece el hijo azul con otro nombre, no se le aplicará esta
+corrección y el verificador lo avisará; habría que dar de alta su propio
+código/UM.
 
 **Línea 30:** la encargada confirmó a las 19:17 que la **Tapa Vaso Pequeña/
 Infantil ya NO EXISTE en el ERP**. Se deja vacía. Antes del pedido de 146
