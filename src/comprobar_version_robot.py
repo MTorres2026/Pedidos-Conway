@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Alias SIN ESPACIOS de «comprobar version robot.py».
+r"""Alias SIN ESPACIOS de «comprobar version robot.py».
 
 Hace exactamente lo mismo, pero su nombre se puede escribir en la terminal
 sin comillas. Uso:
