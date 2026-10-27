@@ -1,0 +1,52 @@
+{
+  "_AVISO": "Correcciones verificadas en el ERP PeopleSoft el 27/10/2026. Este archivo SI esta en Git: es la forma de que lleguen a todos los PCs sin subir data/. Tienen PRIORIDAD sobre data/supermaestro.json y data/supermaestro_flow.json. Ver src/catalogo_erp.py.",
+
+  "CORRECCIONES": [
+
+    {
+      "ID VISTA": "9580",
+      "PRODUCTO": "(CI) Bolsa Asa Papel",
+      "ID ERP": "1003020091",
+      "UM ERP": "ICG",
+      "ESTADO": "UM_PENDIENTE_DE_CONFIRMAR",
+      "NOTA / REGLA": "El codigo 1003020091 SI existe: el ERP devuelve '(CI) Bolsa Asa Papel'. La UM 'IAH' fue rechazada ('Valor no valido') en el pedido de 100 lineas del 27/10/2026. El catalogo local ya traia ICG, que es una UM real del ERP (Bandeja Nachos 1003020007 la usa). PENDIENTE: confirmar en Búsqueda Art que ICG es valida PARA ESTE articulo; si el informe del pedido de 100 vuelve a marcar la fila 26, buscar la UM correcta con la lupa del campo *UM."
+    },
+
+    {
+      "ID VISTA": "8969",
+      "PRODUCTO": "(CI) Cuchara Madera",
+      "ID ERP": "1003020096",
+      "UM ERP": "GDE",
+      "ESTADO": "CONFIRMADO_ERP",
+      "NOTA / REGLA": "Verificado en el ERP: al escribir 1003020096 el sistema devuelve '(CI) Cuchara Madera' / '(CI) Cuchara Madera Caja de 2000 Piezas' con UM GDE. El codigo anterior 1003020087 NO EXISTE y fue rechazado en la fila 28 del pedido de 100."
+    },
+
+    {
+      "ID VISTA": "122",
+      "PRODUCTO": "(CI) Tapa Vaso Mediana",
+      "ID ERP": "1003020030",
+      "UM ERP": "CJA",
+      "ESTADO": "CONFIRMADO_ERP",
+      "NOTA / REGLA": "Verificado en el ERP: al escribir 1003020030 el sistema devuelve '(CI) Tapa Vaso Mediana' / 'Caja' con UM CJA. El codigo original era CORRECTO; lo que estaba mal era la UM: GDE no es valida para este articulo (fila 29 del pedido de 100). OJO: 1003020096 es Cuchara Madera, NO una tapa."
+    },
+
+    {
+      "ID VISTA": "123",
+      "PRODUCTO": "(CI) Tapa Vaso Pequeña/Infantil",
+      "ID ERP": "",
+      "UM ERP": "",
+      "ESTADO": "NO_EXISTE_EN_ERP",
+      "NOTA / REGLA": "La encargada confirmo el 27/10/2026 que este articulo YA NO EXISTE en el ERP. NO inventar un codigo sustituto. Esta correccion NO se aplica: se deja la linea tal cual llega de Flow para que el robot (v6b) la anote como incidencia real en el informe y SIGA con las demas. Decision de la encargada: 'LA DEJAMOS'. Retirar este producto del catalogo de pedidos de CineStock/Flow en cuanto se pueda."
+    },
+
+    {
+      "ID VISTA": "9816",
+      "PRODUCTO": "(CI) Divisor Palomitas Universal",
+      "ID ERP": "1003020099",
+      "UM ERP": "GDE",
+      "ESTADO": "CONFIRMADO_ERP",
+      "NOTA / REGLA": "Confirmado por la encargada: GDE SI es valida para 1003020099. Las UM son POR ARTICULO: que GDE no valga para Tapa Vaso Mediana no significa que este mal aqui."
+    }
+
+  ]
+}

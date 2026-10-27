@@ -38,7 +38,32 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 PEDIDO_ACTUAL = BASE_DIR / "data" / "pedido_actual.json"
 HISTORIAL_DIR = BASE_DIR / "data" / "historial_pedidos"
 PDF_DIR = BASE_DIR / "data" / "pdf_pedidos"
-SUPERMAESTRO = BASE_DIR / "data" / "supermaestro_flow.json"
+# ---------------------------------------------------------------------------
+# CATÁLOGO SUPERMAESTRO (corregido 2026-10-27)
+#
+# Antes aquí se leía SOLO data/supermaestro_flow.json, un archivo que no
+# existía: la pantalla del catálogo guardaba en data/supermaestro.json y el
+# «except» se tragaba el error en silencio. Resultado: los pedidos llegaban al
+# robot con los idErp/umErp viejos de Flow y el ERP rechazaba 4 artículos.
+#
+# Ahora la lógica está en src/catalogo_erp.py:
+#   - lee data/supermaestro.json (o _flow.json, por compatibilidad),
+#   - le aplica las correcciones verificadas de src/recursos/correcciones_erp.json,
+#     que SÍ están en Git y por tanto llegan al PC del cine con git pull,
+#   - y AVISA en consola si algo falta, en vez de fallar en silencio.
+# data/ sigue fuera de Git (.gitignore). .env jamás se sube.
+# ---------------------------------------------------------------------------
+_RUTA_SRC = Path(__file__).resolve().parent
+if str(_RUTA_SRC) not in sys.path:
+    sys.path.insert(0, str(_RUTA_SRC))
+
+from catalogo_erp import (  # noqa: E402
+    aplicar_a_lineas,
+    cargar_catalogo,
+    indice_por_vista,
+)
+
+SUPERMAESTRO = BASE_DIR / "data" / "supermaestro_flow.json"  # compatibilidad
 # [C1] El orderId viene de la red y acaba dentro de nombres de fichero y de un
 # patrón de glob. Se valida: sin puntos, sin barras, sin metacaracteres.
 # Así se bloquean a la vez el path traversal ("../../x") y el glob inyectado
@@ -277,36 +302,25 @@ class CineStockRequestHandler(BaseHTTPRequestHandler):
                 pdf_granel_bytes = contenido
         return data, pdf_bytes, pdf_granel_bytes
     def aplicar_supermaestro(self, data):
+        """Corrige idErp/umErp de las líneas entrantes.
+
+        OJO (2026-10-27): la versión anterior hacía «except: return data»
+        cuando faltaba data/supermaestro_flow.json, así que NO corregía nada
+        y no avisaba. Ahora se avisa siempre y, aunque no haya catálogo local,
+        se aplican las correcciones ERP versionadas en src/recursos.
+        """
+        productos, avisos = cargar_catalogo()
+        for aviso in avisos:
+            print(f"[CATÁLOGO] {aviso}")
         try:
-            cat = json.loads(SUPERMAESTRO.read_text(encoding="utf-8"))
-            productos = cat.get("SUPERMAESTRO", cat) if isinstance(cat, dict) else cat
+            sys.stdout.flush()
         except Exception:
-            return data
-        por_vista = {}
-        for p in productos:
-            vista = str(p.get("ID VISTA", "") or "").strip()
-            if vista and vista != "—":
-                por_vista.setdefault(vista, []).append(p)
-        def _normaliza(s):
-            return "".join(c for c in str(s or "").lower() if c.isalnum())
+            pass
+        indice = indice_por_vista(productos)
         lineas = data.get("lineas", [])
-        for linea in lineas:
-            if linea.get("origen") == "granel":
-                continue
-            candidatos = por_vista.get(str(linea.get("idVista", "")))
-            if not candidatos:
-                continue
-            desc = _normaliza(linea.get("descripcion", ""))
-            mejor = max(candidatos, key=lambda p: sum(1 for w in _normaliza(p.get("PRODUCTO", "")).split() if len(w) > 2 and w in desc))
-            id_erp = str(mejor.get("ID ERP", "") or "").strip()
-            um_erp = str(mejor.get("UM ERP", "") or "").strip().split("/")[0].strip()
-            if id_erp:
-                linea["codigo"] = id_erp
-                linea["idArticulo"] = id_erp
-                linea["idErp"] = id_erp
-            if um_erp:
-                linea["umErp"] = um_erp
-                linea["unidad"] = um_erp
+        corregidas = aplicar_a_lineas(lineas, indice)
+        if corregidas:
+            print(f"[CATÁLOGO] {corregidas} línea(s) corregidas con ID ERP / UM ERP.")
         return data
     def fusionar_granel(self, data, pdf_granel_bytes):
         data = self.aplicar_supermaestro(data)
@@ -466,11 +480,18 @@ class CineStockRequestHandler(BaseHTTPRequestHandler):
             self.enviar_json(200, {"ok": True, "pong": True, "version": VERSION})
             return
         if self.path == "/supermaestro":
+            # Devuelve el catálogo YA CORREGIDO (catálogo local + correcciones
+            # ERP versionadas). Mantiene la forma {"SUPERMAESTRO": [...]} que
+            # espera Flow, para no romper la app Android.
             try:
-                cat = json.loads(SUPERMAESTRO.read_text(encoding="utf-8"))
-                self.enviar_json(200, cat)
-            except Exception:
-                self.enviar_json(404, {"ok": False, "error": "supermaestro.json no disponible"})
+                productos, avisos = cargar_catalogo()
+                if not productos:
+                    self.enviar_json(404, {"ok": False, "error": "supermaestro.json no disponible"})
+                else:
+                    print(f"[CATÁLOGO] GET /supermaestro: {len(productos)} productos. {avisos}")
+                    self.enviar_json(200, {"SUPERMAESTRO": productos})
+            except Exception as e:
+                self.enviar_json(404, {"ok": False, "error": f"supermaestro no disponible: {e}"})
             return
         if self.path.startswith("/pedido/"):
             oid = unquote(self.path[len("/pedido/"):])

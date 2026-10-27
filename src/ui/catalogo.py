@@ -10,6 +10,12 @@ Puerta trasera para mantenimiento de productos:
   pedidos entrantes (sobrescribe idErp/umErp si Flow trae datos viejos)
   y expone en GET /supermaestro para que Flow pueda descargarlo.
 
+IMPORTANTE (2026-10-27): antes «Guardar» solo escribía data/supermaestro.json,
+pero el receptor leía data/supermaestro_flow.json, que no existía. Ahora se
+escriben LOS DOS a la vez. Además, las correcciones verificadas en el ERP
+(src/recursos/correcciones_erp.json, SÍ versionadas en Git) tienen prioridad
+sobre lo que haya en data/: ver src/catalogo_erp.py.
+
 Columnas del JSON (se conservan tal cual): GRUPO, TIPO REGISTRO,
 PRODUCTO, ID VISTA, ID ERP, UM ERP, ID CONWAY, DENOMINACIÓN LARGA
 CONWAY, PRESENTACIÓN, UNIDADES POR CAJA/PACK, UNIDAD PEDIDO FLOW,
@@ -121,6 +127,11 @@ class Catalogo(QWidget):
             / "data"
             / "supermaestro.json"
         )
+        # El nombre histórico que leía el receptor. Se mantiene sincronizado
+        # para que nunca vuelva a pasarnos lo del pedido de 100 líneas.
+        self.ruta_catalogo_flow = self.ruta_catalogo.with_name(
+            "supermaestro_flow.json"
+        )
         self.productos = []
 
         layout = QVBoxLayout(self)
@@ -215,10 +226,13 @@ class Catalogo(QWidget):
         """Lee data/supermaestro.json y pinta la tabla."""
         self.productos = []
 
-        if self.ruta_catalogo.exists():
+        ruta = self.ruta_catalogo
+        if not ruta.exists() and self.ruta_catalogo_flow.exists():
+            ruta = self.ruta_catalogo_flow
+        if ruta.exists():
             try:
                 datos = json.loads(
-                    self.ruta_catalogo.read_text(encoding="utf-8")
+                    ruta.read_text(encoding="utf-8")
                 )
                 # Formato {"SUPERMAESTRO": [...]} o lista directa
                 if isinstance(datos, dict):
@@ -249,30 +263,39 @@ class Catalogo(QWidget):
         self.cargar_tabla()
 
     def guardar(self):
-        """Escribe el catálogo a data/supermaestro.json."""
+        """Escribe el catálogo en LOS DOS nombres que puede leer el receptor.
+
+        data/supermaestro.json       -> el que edita esta pantalla
+        data/supermaestro_flow.json  -> el nombre histórico del receptor
+
+        Escribir los dos evita que una corrección hecha aquí no llegue al
+        pedido (fallo detectado en el pedido de 100 líneas del 27/10/2026).
+        """
         try:
             self.ruta_catalogo.parent.mkdir(
                 parents=True,
                 exist_ok=True
             )
-            self.ruta_catalogo.write_text(
-                json.dumps(
-                    {"SUPERMAESTRO": self.productos},
-                    indent=2,
-                    ensure_ascii=False
-                ),
-                encoding="utf-8"
+            texto = json.dumps(
+                {"SUPERMAESTRO": self.productos},
+                indent=2,
+                ensure_ascii=False
             )
+            self.ruta_catalogo.write_text(texto, encoding="utf-8")
+            self.ruta_catalogo_flow.write_text(texto, encoding="utf-8")
             QMessageBox.information(
                 self,
                 "Catálogo guardado",
-                "Catálogo actualizado.\n\n"
-                "El receptor lo aplicará automáticamente a los "
-                "pedidos que lleguen desde ahora (corrigiendo "
-                "ID ERP / UM si Flow trae datos desactualizados)."
+                "Catálogo actualizado en los dos archivos que lee el receptor.\n\n"
+                "El receptor lo aplicará automáticamente a los pedidos que "
+                "lleguen desde ahora (corrigiendo ID ERP / UM si Flow trae "
+                "datos desactualizados).\n\n"
+                "Recuerda: las correcciones ya verificadas en el ERP "
+                "(src/recursos/correcciones_erp.json) tienen prioridad y SÍ "
+                "se suben a Git para que lleguen al PC del cine."
             )
             self.etiqueta_estado.setText(
-                f"{len(self.productos)} productos · guardado ✓"
+                f"{len(self.productos)} productos · guardado ✓ (2 archivos)"
             )
         except Exception as e:
             QMessageBox.critical(

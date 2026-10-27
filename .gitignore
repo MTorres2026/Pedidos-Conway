@@ -1,7 +1,21 @@
+# --- Seguridad / datos locales (NO SUBIR NUNCA) ---
+.env
+.env.*
+!.env.example
+data/
+
+# --- Python ---
 __pycache__/
 *.py[cod]
 *$py.class
-.env
 venv/
 env/
-data/
+
+# --- Informes, capturas y backups que genera el robot (src/robot_erp.py) ---
+# No son código: son salidas de cada carrera. Se quedan en cada PC.
+src/errores_pedido_*.txt
+src/pantalla_pedido_*.png
+src/robot_erp.py.bak_*
+src/robot_erp_con_v7_*.py
+src/resultado_*.txt
+src/modulos/Nuevo Documento de texto.txt
