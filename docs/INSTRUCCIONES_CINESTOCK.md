@@ -329,8 +329,66 @@ Es seguro ejecutarlo incluso justo antes de una carrera del robot.
 
 ---
 
-## 9. Pendiente (mejora futura, tarea 6)
+## 9. ✅ Carrera REAL de 100 líneas — 27/10/2026, 18:55 — OBJETIVO CONSEGUIDO
+
+Informe: `src/errores_pedido_20261027_185530.txt`
+Captura: `src/pantalla_pedido_20261027_185530.png`
+
+**Resultado: 90 de 100 líneas sin incidencias, 10 con problemas.**
+Chrome **NO** se cerró. v6b anotó cada fallo y **SIGUIÓ hasta la línea 100**.
+Comparación con la carrera de las 14:29 (la del JSON viejo): 28/100 → 90/100.
+
+### Lo que salió bien
+
+* Las **3 correcciones ERP se aceptaron**: las líneas **26, 28 y 29 NO**
+  aparecen en la lista de problemas.
+* En particular **`1003020091 / ICG` (Bolsa Asa Papel) queda CONFIRMADO por el
+  ERP**. Ya no está pendiente: se ha actualizado `correcciones_erp.json` a
+  `CONFIRMADO_ERP`.
+* Las familias (Kit Kat `HSI`, Skittle `HWD`, Haribo, Estuchados, Kojak) no
+  dieron ni un problema.
+* La línea 30 (Tapa Infantil) dio el error **esperado**: decisión «LA DEJAMOS».
+
+### Las 10 incidencias
+
+| Línea | Artículo | Motivo | Tipo |
+|---|---|---|---|
+| 30 | `1003020031 / IDZ` (CI) Tapa Vaso Pequeña/Infantil | El ERP no reconoce el artículo | **ESPERADA**, se deja |
+| 38 | `1005010028 / HUM` Piruleta Corazon | El ERP no reconoce el artículo | código nuevo a buscar con la lupa |
+| 43 | `1001010014 / IEH` Carton Palomitas XXL | El ERP no acepta la UM `IEH` | UM nueva a buscar con la lupa de `*UM` |
+| 93 | `1001050004 / GAE` Goma Granel 1Kg.Huevos | No cargó la descripción | sospecha de falso positivo |
+| 94 | `1001050004 / GEJ` Haribo Pasta Bas.Fresa.Pic | No se quedó escrito | sospecha de falso positivo |
+| 95 | `1001050004 / GGC` Dragibus Bolsa 2 Kilos | No se quedó escrito | sospecha de falso positivo |
+| 96 | `1001050004 / HBJ` Lagartones Bolsa 1 Kilo | No cargó la descripción | sospecha de falso positivo |
+| 98 | `1001050002 / GFX` Twix Minix 2,5 kg | No cargó la descripción | sospecha de falso positivo |
+| 99 | `1001050002 / HCG` Almendra California Blanca | No cargó la descripción | sospecha de falso positivo |
+| 100 | `1001050002 / HCH` Almendra California Leche | No cargó la descripción | sospecha de falso positivo |
+
+Cantidad de las 7 últimas: **2** en todas.
+
+### Por qué las 7 del final parecen un problema del grid, NO de los datos
+
+En `src/robot_erp.py`, `leer_descripcion()` lee la descripción por la posición
+`$i` del DOM. Con el grid paginado al final del pedido ese índice se descoloca:
+el robot escribe el artículo, no consigue leer la descripción y **él mismo
+vacía la línea** (`vaciar()`). Prueba de que los códigos son buenos: en la
+captura, las líneas **92** (`1001050004 / GAD`) y **97** (`1001050004 / HBM`),
+con el **mismo código**, sí están correctamente rellenas.
+
+Antes de Guardar hay que **comprobar a mano una de esas líneas**. Si el ERP
+acepta el código, se rellenan las 7 a mano y se guarda.
+
+> 🔴 **NO SE HA PULSADO GUARDAR.** Revisar con la encargada antes. El vigilante
+> del ID de Solicitud está esperando en la consola negra: no cerrarla.
+
+---
+
+## 10. Pendiente (mejora futura, tarea 6)
 
 Validar en CineStock, antes de pulsar «Enviar a ERP», que cada `idErp` y cada
 `umErp` existen en el catálogo y que el artículo no esté marcado como
 `NO_EXISTE_EN_ERP`. Así una UM inválida nunca llegaría al ERP.
+
+Tarea nueva surgida de la carrera de las 18:55: investigar por qué
+`leer_descripcion()` falla en las últimas líneas del grid paginado; mientras
+tanto, esas líneas se corrigen a mano en el ERP antes de Guardar.

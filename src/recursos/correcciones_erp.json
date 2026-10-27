@@ -20,8 +20,8 @@
       "PRODUCTO": "(CI) Bolsa Asa Papel",
       "ID ERP": "1003020091",
       "UM ERP": "ICG",
-      "ESTADO": "UM_PENDIENTE_DE_CONFIRMAR",
-      "NOTA / REGLA": "El codigo 1003020091 SI existe: el ERP devuelve '(CI) Bolsa Asa Papel'. La UM 'IAH' fue rechazada ('Valor no valido') en el pedido de 100 lineas del 27/10/2026. El catalogo local ya traia ICG, que es una UM real del ERP (Bandeja Nachos 1003020007 la usa). PENDIENTE: confirmar en Búsqueda Art que ICG es valida PARA ESTE articulo; si el informe del pedido de 100 vuelve a marcar la fila 26, buscar la UM correcta con la lupa del campo *UM."
+      "ESTADO": "CONFIRMADO_ERP",
+      "NOTA / REGLA": "CONFIRMADO el 27/10/2026 a las 18:55 en la carrera real de 100 lineas: la linea 26 (1003020091 / ICG) NO aparece en el informe de incidencias, luego el ERP la acepto. El codigo 1003020091 SI existe y devuelve '(CI) Bolsa Asa Papel'. La UM 'IAH' era la mala y fue rechazada en la carrera de las 14:29. ICG es una UM real del ERP (Bandeja Nachos 1003020007 la usa). Ya NO hace falta la lupa de *UM."
     },
 
     {
