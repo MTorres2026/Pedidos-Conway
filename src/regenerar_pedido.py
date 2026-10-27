@@ -51,9 +51,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from catalogo_erp import (  # noqa: E402
     aplicar_a_linea,
     avisos_estado,
-    familias_en_lineas,
     familias_protegidas,
     indice_correcciones,
+    resumen_familias,
     no_existentes,
 )
 
@@ -103,13 +103,7 @@ def corregir_archivo(ruta, indice):
     if not lineas:
         return 0, [], "sin líneas", ""
 
-    conteo = familias_en_lineas(lineas)
-    resumen_familias = ""
-    if conteo:
-        resumen_familias = (
-            "    familias BLINDADAS intactas: "
-            + ", ".join(f"{k} ({v})" for k, v in sorted(conteo.items()))
-        )
+    detalle_familias = resumen_familias(lineas)
 
     cambios = []
     for n, linea in enumerate(lineas, 1):
@@ -133,8 +127,8 @@ def corregir_archivo(ruta, indice):
 
     if cambios:
         copia = _escribir(ruta, datos)
-        return len(cambios), cambios, f"copia: {copia.name}", resumen_familias
-    return 0, [], "sin cambios (ya estaba corregido)", resumen_familias
+        return len(cambios), cambios, f"copia: {copia.name}", detalle_familias
+    return 0, [], "sin cambios (ya estaba corregido)", detalle_familias
 
 
 def main():
@@ -201,7 +195,7 @@ def main():
             print(f"  [aviso] no existe: {ruta}")
             continue
         try:
-            n, cambios, nota, resumen_familias = corregir_archivo(ruta, indice)
+            n, cambios, nota, detalle_familias = corregir_archivo(ruta, indice)
         except Exception as e:
             print(f"  [ERROR] {ruta}: {e}")
             continue
@@ -213,8 +207,10 @@ def main():
         print(f"    {n} línea(s) corregida(s) · {nota}")
         for c in cambios:
             print(c)
-        if resumen_familias:
-            print(resumen_familias)
+        if detalle_familias:
+            print("    familias BLINDADAS intactas (código/UM real):")
+            for linea in detalle_familias:
+                print(linea)
         print()
         total += n
 

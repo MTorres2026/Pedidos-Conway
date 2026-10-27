@@ -124,6 +124,37 @@ def familias_en_lineas(lineas):
     return conteo
 
 
+def resumen_familias(lineas):
+    """Líneas de texto con las UM REALES de cada familia, para verificar
+    a simple vista que nadie las ha cambiado.
+
+    Ejemplo: '    Kit Kat (2 líneas): 1000000001/HSI, 1000000002/GBC'
+    """
+    datos = {}
+    for linea in lineas or []:
+        if not isinstance(linea, dict):
+            continue
+        fam = familia_de(linea.get("descripcion", ""))
+        if not fam:
+            continue
+        d = datos.setdefault(fam, {"n": 0, "valores": []})
+        d["n"] += 1
+        codigo = str(linea.get("codigo") or linea.get("idErp") or "").strip()
+        um = str(linea.get("unidad") or linea.get("umErp") or "").strip()
+        valor = f"{codigo}/{um}" if codigo else um
+        if valor and valor not in d["valores"]:
+            d["valores"].append(valor)
+    salida = []
+    for fam in sorted(datos):
+        d = datos[fam]
+        muestra = ", ".join(d["valores"][:6])
+        if len(d["valores"]) > 6:
+            muestra += ", ..."
+        palabra = "línea" if d["n"] == 1 else "líneas"
+        salida.append(f"    {fam} ({d['n']} {palabra}): {muestra or '(sin UM)'}")
+    return salida
+
+
 def no_existentes():
     """Nombres marcados como NO_EXISTE_EN_ERP (para avisar, no para sustituir)."""
     return [
