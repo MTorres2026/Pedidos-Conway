@@ -286,13 +286,15 @@ class Catalogo(QWidget):
             QMessageBox.information(
                 self,
                 "Catálogo guardado",
-                "Catálogo actualizado en los dos archivos que lee el receptor.\n\n"
-                "El receptor lo aplicará automáticamente a los pedidos que "
-                "lleguen desde ahora (corrigiendo ID ERP / UM si Flow trae "
-                "datos desactualizados).\n\n"
-                "Recuerda: las correcciones ya verificadas en el ERP "
-                "(src/recursos/correcciones_erp.json) tienen prioridad y SÍ "
-                "se suben a Git para que lleguen al PC del cine."
+                "Catálogo actualizado en los dos archivos locales y en "
+                "GET /supermaestro (para que Flow pueda descargarlo).\n\n"
+                "OJO: el receptor NO reescribe los pedidos con el catálogo "
+                "entero. Solo aplica las correcciones verificadas en "
+                "src/recursos/correcciones_erp.json, porque las familias con "
+                "variantes (Kit Kat, Skittle, Haribo, Estuchados, Helados, "
+                "Kojack) comparten ID VISTA y sus UM no deben tocarse.\n\n"
+                "Ese archivo de correcciones SÍ está en Git para que llegue "
+                "al PC del cine."
             )
             self.etiqueta_estado.setText(
                 f"{len(self.productos)} productos · guardado ✓ (2 archivos)"

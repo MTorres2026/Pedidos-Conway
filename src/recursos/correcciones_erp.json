@@ -1,6 +1,17 @@
 {
   "_AVISO": "Correcciones verificadas en el ERP PeopleSoft el 27/10/2026. Este archivo SI esta en Git: es la forma de que lleguen a todos los PCs sin subir data/. Tienen PRIORIDAD sobre data/supermaestro.json y data/supermaestro_flow.json. Ver src/catalogo_erp.py.",
 
+  "_AVISO_FAMILIAS": "Estas familias tienen VARIANTES ('hijos') que comparten ID VISTA pero tienen UMs DISTINTAS. Sus UMs vienen BIEN de Flow. NINGUN proceso (regenerar_pedido.py, receptor.py, ni GET /supermaestro) puede cambiar una linea cuyo nombre contenga una de estas palabras. Es un seguro añadido el 27/10/2026 a peticion de la encargada.",
+
+  "FAMILIAS_PROTEGIDAS": [
+    "Kit Kat",
+    "Skittle",
+    "Haribo",
+    "Estuchado",
+    "Helado",
+    "Kojack"
+  ],
+
   "CORRECCIONES": [
 
     {

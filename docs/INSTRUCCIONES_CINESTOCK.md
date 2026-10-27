@@ -78,6 +78,40 @@ Al ejecutar `regenerar_pedido.py` deben aparecer **solo 3 líneas corregidas**
 por archivo (Bolsa Asa Papel, Cuchara Madera, Tapa Vaso Mediana). Si aparece
 cualquier otra línea, **no lances el robot** y avisa.
 
+### 🛡️ Familias blindadas
+
+A petición de la encargada, estas familias y **todos sus "hijos"** están
+protegidos por nombre: **Kit Kat, Skittle, Haribo 100, Estuchados 3.90,
+Helados y Kojack**.
+
+La lista está en `src/recursos/correcciones_erp.json` →
+`FAMILIAS_PROTEGIDAS`. Ni `regenerar_pedido.py`, ni `src/receptor.py`, ni el
+catálogo `GET /supermaestro` pueden cambiar una línea cuyo nombre contenga
+una de esas palabras. Es un seguro doble: aunque alguien vuelva a cargar el
+catálogo entero, esas UM no se tocan.
+
+Además, al aplicar una corrección al catálogo solo se modifica la fila cuyo
+**nombre** coincide. Antes se modificaban *todas* las filas con el mismo
+`ID VISTA`, que es justo lo que estropeaba a los "hijos" de una familia.
+
+`regenerar_pedido.py` imprime una línea de control, por ejemplo:
+
+```
+    familias BLINDADAS intactas: Haribo (3), Helado (2), Kit Kat (4), Kojack (1), Skittle (2)
+```
+
+### ❌ NO ejecutar «aplicar parche v6.py»
+
+Ese parcheador es la versión **anterior** a la v6b. Trae las mismas funciones
+de anclado/bloques, pero con una diferencia crítica: **se PARA en la primera
+línea que falle**. Con la Tapa Infantil en la línea 30, no llegaría a la 100.
+La v6b, en cambio, **anota la incidencia y SIGUE**.
+
+`src/robot_erp.py` ya contiene todo el parche v6 **y** el arreglo "b". Si se
+ejecutara ese parcheador sobre él, diría «El parche v6 ya está aplicado» (no
+haría nada); si se ejecutara sobre un robot más antiguo, lo **desactualizaría**.
+Por tanto: no se sube a Git y no se ejecuta.
+
 ---
 
 ## 3. Archivos nuevos / cambiados en esta sesión
@@ -94,7 +128,7 @@ cualquier otra línea, **no lances el robot** y avisa.
 | `src/recursos/correcciones_erp.json` | **NUEVO.** Las 5 correcciones verificadas (SÍ en Git). |
 | `src/receptor.py` | **CAMBIADO.** Ya no falla en silencio; aplica `catalogo_erp`. |
 | `src/ui/catalogo.py` | **CAMBIADO.** «Guardar» escribe los DOS archivos `data/*.json`. |
-| `src/regenerar_pedido.py` | **NUEVO.** Reaplica el catálogo a pedidos ya guardados. |
+| `src/regenerar_pedido.py` | **NUEVO.** Reaplica SOLO las correcciones ERP a pedidos ya guardados (`--restaurar` deshace una ejecución anterior). |
 | `.gitignore` | Excluye informes, capturas y backups del robot. |
 
 **v7 queda aparcado.** No se sube ni se aplica.
@@ -109,10 +143,20 @@ En la terminal, en la raíz del proyecto
 ```
 git fetch origin
 git pull origin arena/67d0fffb-pedidos-conway
-python "src\comprobar version robot.py"
+python "src\comprobar_version_robot.py"
 ```
 
 Debe decir: **`v6b (la buena: anota el error y SIGUE)`**.
+
+> Si `git pull` da conflicto porque tu `main` local tiene cambios de otra
+> sesión, NO hagas merge. Usa la forma selectiva (trae solo los archivos de
+> esta rama sin tocar tu historial):
+>
+> ```
+> git fetch origin
+> git checkout origin/arena/67d0fffb-pedidos-conway -- .gitignore src/robot_erp.py src/receptor.py src/ui/catalogo.py src/catalogo_erp.py src/recursos/correcciones_erp.json src/regenerar_pedido.py "src/comprobar version robot.py" src/comprobar_version_robot.py "src/aplicar parche v5.py" "src/aplicar parche v6b.py" "src/devolver v6.py" docs/INSTRUCCIONES_CINESTOCK.md
+> git reset
+> ```
 
 El `.env` NO se toca: ya lo tienes con `ERP_USER` / `ERP_PASS`. Nunca se sube.
 

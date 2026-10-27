@@ -51,6 +51,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from catalogo_erp import (  # noqa: E402
     aplicar_a_linea,
     avisos_estado,
+    familias_en_lineas,
+    familias_protegidas,
     indice_correcciones,
     no_existentes,
 )
@@ -99,7 +101,15 @@ def corregir_archivo(ruta, indice):
     datos = _leer(ruta)
     lineas = _lineas_de(datos)
     if not lineas:
-        return 0, [], "sin líneas"
+        return 0, [], "sin líneas", ""
+
+    conteo = familias_en_lineas(lineas)
+    resumen_familias = ""
+    if conteo:
+        resumen_familias = (
+            "    familias BLINDADAS intactas: "
+            + ", ".join(f"{k} ({v})" for k, v in sorted(conteo.items()))
+        )
 
     cambios = []
     for n, linea in enumerate(lineas, 1):
@@ -123,8 +133,8 @@ def corregir_archivo(ruta, indice):
 
     if cambios:
         copia = _escribir(ruta, datos)
-        return len(cambios), cambios, f"copia: {copia.name}"
-    return 0, [], "sin cambios (ya estaba corregido)"
+        return len(cambios), cambios, f"copia: {copia.name}", resumen_familias
+    return 0, [], "sin cambios (ya estaba corregido)", resumen_familias
 
 
 def main():
@@ -148,6 +158,9 @@ def main():
     print("=" * 78)
     print(f"  Correcciones activas: {correcciones} artículos")
     print("  (el resto de líneas se dejan EXACTAMENTE como las mandó Flow)")
+    fams = familias_protegidas()
+    if fams:
+        print("  Familias BLINDADAS (intocables): " + ", ".join(fams))
     for a in avisos_estado():
         print(f"  [aviso] {a}")
     for nombre in no_existentes():
@@ -188,7 +201,7 @@ def main():
             print(f"  [aviso] no existe: {ruta}")
             continue
         try:
-            n, cambios, nota = corregir_archivo(ruta, indice)
+            n, cambios, nota, resumen_familias = corregir_archivo(ruta, indice)
         except Exception as e:
             print(f"  [ERROR] {ruta}: {e}")
             continue
@@ -200,6 +213,8 @@ def main():
         print(f"    {n} línea(s) corregida(s) · {nota}")
         for c in cambios:
             print(c)
+        if resumen_familias:
+            print(resumen_familias)
         print()
         total += n
 

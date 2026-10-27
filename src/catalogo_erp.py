@@ -33,9 +33,18 @@ que ya estaban bien. Por eso:
   - cargar_catalogo() (catálogo completo fusionado) se usa ÚNICAMENTE para
     el endpoint GET /supermaestro, para que Flow pueda descargarlo.
   - Todo lo que Flow mande bien se deja EXACTAMENTE como viene.
+
+FAMILIAS BLINDADAS (añadido el 27/10/2026 a petición de la encargada)
+----------------------------------------------------------------------
+Kit Kat, Skittle, Haribo 100, Estuchados 3.90, Helados y Kojack tienen
+variantes ("hijos") que comparten ID VISTA pero tienen UMs DISTINTAS.
+La lista está en src/recursos/correcciones_erp.json -> FAMILIAS_PROTEGIDAS.
+Ninguna línea cuyo nombre contenga una de esas palabras se toca, ni aquí,
+ni en el receptor, ni en el catálogo que se sirve a Flow.
 """
 
 import json
+import re
 import sys
 import unicodedata
 from pathlib import Path
@@ -75,6 +84,44 @@ def _productos_de(datos):
 def correcciones_erp():
     """Lista de correcciones verificadas (nunca falla: devuelve [])."""
     return _productos_de(_leer_json_seguro(CORRECCIONES_ERP) or [])
+
+
+def familias_protegidas():
+    """Palabras clave de familias con variantes. Nunca falla (devuelve [])."""
+    datos = _leer_json_seguro(CORRECCIONES_ERP)
+    if not isinstance(datos, dict):
+        return []
+    return [
+        str(x).strip()
+        for x in datos.get("FAMILIAS_PROTEGIDAS", [])
+        if str(x).strip()
+    ]
+
+
+def familia_de(descripcion):
+    """Devuelve la palabra de familia que aparece en la descripción, o None."""
+    texto = _normaliza(descripcion)
+    for fam in familias_protegidas():
+        if _normaliza(fam) in texto:
+            return fam
+    return None
+
+
+def es_familia_protegida(descripcion):
+    """True si la línea pertenece a una familia con variantes: NO SE TOCA."""
+    return familia_de(descripcion) is not None
+
+
+def familias_en_lineas(lineas):
+    """{familia: nº de líneas} de las líneas protegidas (para informar)."""
+    conteo = {}
+    for linea in lineas or []:
+        if not isinstance(linea, dict):
+            continue
+        fam = familia_de(linea.get("descripcion", ""))
+        if fam:
+            conteo[fam] = conteo.get(fam, 0) + 1
+    return conteo
 
 
 def no_existentes():
@@ -140,14 +187,34 @@ def cargar_catalogo():
         um_erp = str(c.get("UM ERP", "") or "").strip().split("/")[0].strip()
         if not id_erp and not um_erp:
             continue
-        destinos = por_vista.get(v)
-        if destinos:
-            for d in destinos:
+        nombre = str(c.get("PRODUCTO", "") or "").strip()
+        if es_familia_protegida(nombre):
+            avisos.append(
+                f"AVISO: la corrección de '{nombre}' cae en una familia "
+                "protegida; NO se aplica (revísala a mano)."
+            )
+            continue
+        destinos = por_vista.get(v) or []
+        # SOLO la fila cuyo NOMBRE coincide. Antes se modificaban TODAS las
+        # filas con ese ID VISTA, y en una familia eso cambiaba la UM de los
+        # "hijos" (variantes) que ya venían bien de Flow.
+        coincidentes = [
+            d for d in destinos
+            if not es_familia_protegida(d.get("PRODUCTO", ""))
+            and _mismo_producto(nombre, d.get("PRODUCTO", ""))
+        ]
+        if coincidentes:
+            for d in coincidentes:
                 if id_erp:
                     d["ID ERP"] = id_erp
                 if um_erp:
                     d["UM ERP"] = um_erp
                 d["_CORREGIDO_ERP"] = True
+        elif destinos:
+            avisos.append(
+                f"AVISO: ID VISTA {v} existe en el catálogo con otro nombre; "
+                f"no se pisa ninguna variante ('{nombre}')."
+            )
         else:
             fila = dict(c)
             fila["_CORREGIDO_ERP"] = True
@@ -180,6 +247,9 @@ def correcciones_aplicables():
     out = []
     for c in correcciones_erp():
         if str(c.get("ESTADO", "") or "").upper() == "NO_EXISTE_EN_ERP":
+            continue
+        if es_familia_protegida(c.get("PRODUCTO", "")):
+            # Seguro: jamás se reescribe la UM de una familia con variantes.
             continue
         id_erp = str(c.get("ID ERP", "") or "").strip()
         um_erp = str(c.get("UM ERP", "") or "").strip().split("/")[0].strip()
@@ -218,6 +288,17 @@ def avisos_estado():
             f"'{nombre}' ya NO EXISTE en el ERP: no se sustituye; "
             "el informe la marcará."
         )
+    fams = familias_protegidas()
+    if fams:
+        avisos.append(
+            "Familias BLINDADAS (sus UM no se tocan NUNCA): " + ", ".join(fams)
+        )
+    for c in correcciones_erp():
+        if es_familia_protegida(c.get("PRODUCTO", "")):
+            avisos.append(
+                f"AVISO: '{c.get('PRODUCTO', '')}' es una familia protegida; "
+                "su corrección NO se aplica."
+            )
     return avisos
 
 
@@ -226,6 +307,27 @@ def _normaliza(s):
         ch for ch in unicodedata.normalize("NFKD", str(s or "").lower())
         if not unicodedata.combining(ch)
     )
+
+
+def _tokens(s):
+    """Palabras significativas de un nombre (sin acentos, sin '(CI)'...)."""
+    return {
+        t for t in re.split(r"[^a-z0-9]+", _normaliza(s))
+        if len(t) >= 3
+    }
+
+
+def _mismo_producto(a, b):
+    """True si los dos nombres son el mismo producto, admitiendo que uno
+    sea más corto ('Cuchara Madera' vs '(CI) Cuchara Madera Caja 2000').
+
+    Si difieren en una palabra de peso ('Mediana' vs 'Pequeña',
+    'Normal' vs 'Blanco'), devuelve False: son VARIANTES distintas.
+    """
+    ta, tb = _tokens(a), _tokens(b)
+    if not ta or not tb:
+        return False
+    return ta <= tb or tb <= ta
 
 
 def mejor_candidato(candidatos, descripcion):
@@ -248,6 +350,10 @@ def aplicar_a_linea(linea, indice):
     No toca líneas de granel (origen == 'granel').
     """
     if linea.get("origen") == "granel":
+        return None
+    if es_familia_protegida(linea.get("descripcion", "")):
+        # FAMILIAS BLINDADAS: Kit Kat, Skittle, Haribo, Estuchados, Helados,
+        # Kojack y sus "hijos". Sus UM vienen bien de Flow; ni tocarlas.
         return None
     vista = str(linea.get("idVista", "") or "").strip()
     candidatos = indice.get(vista)
