@@ -105,9 +105,12 @@ def main():
         26: ("1003020091", "ICG", "(CI) Bolsa Asa Papel"),
         28: ("1003020096", "GDE", "(CI) Cuchara Madera"),
         29: ("1003020030", "CJA", "(CI) Tapa Vaso Mediana"),
+        # Verificados en el ERP a las 19:17 (captura de Búsqueda Art).
+        38: ("1001040022", "HYR", "Piruleta Corazon"),
+        43: ("1001010014", "GEI", "Carton Palomitas XXL"),
     }
     print()
-    print("  Correcciones ERP (las 3 que el robot DEBE llevar):")
+    print(f"  Correcciones ERP (las {len(esperado)} que el robot DEBE llevar):")
     for n, (cod, um, _desc) in esperado.items():
         fila = lineas[n - 1]
         art, ka = _elegir(fila, ALIAS_ARTICULO)

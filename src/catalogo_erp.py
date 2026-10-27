@@ -298,6 +298,20 @@ def indice_correcciones():
     return indice_por_vista(correcciones_aplicables())
 
 
+def correcciones_por_nombre():
+    """Correcciones SIN «ID VISTA» conocido (marcadas COINCIDENCIA=POR_NOMBRE).
+
+    Ejemplo: Piruleta Corazon (1001040022 / HYR) y Carton Palomitas XXL
+    (1001010014 / GEI), verificados en el ERP el 27/10/2026. Flow no manda
+    su ID VISTA, así que se buscan comparando el NOMBRE del producto con
+    `_mismo_producto()`, que distingue variantes ('Mediana' vs 'Pequeña').
+    """
+    return [
+        c for c in correcciones_aplicables()
+        if not str(c.get("ID VISTA", "") or "").strip()
+    ]
+
+
 def avisos_estado():
     """Avisos de diagnóstico para imprimir en la consola del receptor.
 
@@ -374,23 +388,50 @@ def mejor_candidato(candidatos, descripcion):
     )
 
 
-def aplicar_a_linea(linea, indice):
+def aplicar_a_linea(linea, indice, por_nombre=None):
     """Corrige in-place idErp/umErp/unidad/codigo de UNA línea del pedido.
 
     Devuelve (id_erp, um_erp) aplicados, o None si no hubo corrección.
-    No toca líneas de granel (origen == 'granel').
+    Busca primero por ID VISTA; si no hay, por NOMBRE del producto
+    (correcciones marcadas COINCIDENCIA=POR_NOMBRE, sin ID VISTA conocido).
+
+    No toca líneas de granel (origen == 'granel') ni las familias blindadas.
     """
     if linea.get("origen") == "granel":
         return None
-    if es_familia_protegida(linea.get("descripcion", "")):
+    desc = str(linea.get("descripcion", "") or "").strip()
+    if es_familia_protegida(desc):
         # FAMILIAS BLINDADAS: Kit Kat, Skittle, Haribo, Estuchados, Helados,
-        # Kojack y sus "hijos". Sus UM vienen bien de Flow; ni tocarlas.
+        # Kojak/Kojack y sus "hijos". Sus UM vienen bien de Flow; ni tocarlas.
         return None
     vista = str(linea.get("idVista", "") or "").strip()
     candidatos = indice.get(vista)
     if not candidatos:
-        return None
-    mejor = mejor_candidato(candidatos, linea.get("descripcion", ""))
+        if por_nombre is None:
+            por_nombre = correcciones_por_nombre()
+        if not desc:
+            return None
+        # Exigimos que TODAS las palabras del nombre de la corrección estén
+        # en la descripción (o viceversa). Así 'Carton Palomitas XXL' no
+        # corrige por error a 'Carton Palomitas Mediano'.
+        coincidencias = [c for c in por_nombre
+                         if _mismo_producto(c.get("PRODUCTO", ""), desc)]
+        if len(coincidencias) != 1:
+            return None  # 0 = no aplica; >1 = ambiguo, mejor no tocar
+        mejor = coincidencias[0]
+        id_erp = str(mejor.get("ID ERP", "") or "").strip()
+        um_erp = str(mejor.get("UM ERP", "") or "").strip().split("/")[0].strip()
+        if not id_erp and not um_erp:
+            return None
+        if id_erp:
+            linea["codigo"] = id_erp
+            linea["idArticulo"] = id_erp
+            linea["idErp"] = id_erp
+        if um_erp:
+            linea["umErp"] = um_erp
+            linea["unidad"] = um_erp
+        return (id_erp, um_erp)
+    mejor = mejor_candidato(candidatos, desc)
     id_erp = str(mejor.get("ID ERP", "") or "").strip()
     um_erp = str(mejor.get("UM ERP", "") or "").strip().split("/")[0].strip()
     if not id_erp and not um_erp:
@@ -414,8 +455,9 @@ def aplicar_a_lineas(lineas, indice=None):
     """
     if indice is None:
         indice = indice_correcciones()
+    por_nombre = correcciones_por_nombre()
     corregidas = 0
     for linea in lineas or []:
-        if isinstance(linea, dict) and aplicar_a_linea(linea, indice):
+        if isinstance(linea, dict) and aplicar_a_linea(linea, indice, por_nombre):
             corregidas += 1
     return corregidas

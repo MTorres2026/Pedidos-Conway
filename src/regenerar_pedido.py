@@ -51,6 +51,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from catalogo_erp import (  # noqa: E402
     aplicar_a_linea,
     avisos_estado,
+    correcciones_por_nombre,
     familias_protegidas,
     indice_correcciones,
     resumen_familias,
@@ -104,6 +105,7 @@ def corregir_archivo(ruta, indice):
         return 0, [], "sin líneas", ""
 
     detalle_familias = resumen_familias(lineas)
+    por_nombre = correcciones_por_nombre()
 
     cambios = []
     for n, linea in enumerate(lineas, 1):
@@ -113,7 +115,7 @@ def corregir_archivo(ruta, indice):
             str(linea.get("codigo", "") or ""),
             str(linea.get("unidad", "") or ""),
         )
-        aplicar_a_linea(linea, indice)
+        aplicar_a_linea(linea, indice, por_nombre)
         despues = (
             str(linea.get("codigo", "") or ""),
             str(linea.get("unidad", "") or ""),
@@ -145,7 +147,8 @@ def main():
     args = ap.parse_args()
 
     indice = indice_correcciones()
-    correcciones = sum(len(v) for v in indice.values())
+    correcciones = (sum(len(v) for v in indice.values())
+                    + len(correcciones_por_nombre()))
 
     print("=" * 78)
     print("  REGENERAR PEDIDO CON LAS CORRECCIONES ERP VERIFICADAS")

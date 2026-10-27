@@ -366,17 +366,39 @@ Comparación con la carrera de las 14:29 (la del JSON viejo): 28/100 → 90/100.
 
 Cantidad de las 7 últimas: **2** en todas.
 
-### Por qué las 7 del final parecen un problema del grid, NO de los datos
+### ✅ Datos correctos encontrados en el ERP a las 19:17 (Búsqueda Art)
 
-En `src/robot_erp.py`, `leer_descripcion()` lee la descripción por la posición
-`$i` del DOM. Con el grid paginado al final del pedido ese índice se descoloca:
-el robot escribe el artículo, no consigue leer la descripción y **él mismo
-vacía la línea** (`vaciar()`). Prueba de que los códigos son buenos: en la
-captura, las líneas **92** (`1001050004 / GAD`) y **97** (`1001050004 / HBM`),
-con el **mismo código**, sí están correctamente rellenas.
+La encargada abrió «Búsqueda Art» y obtuvo los códigos/UM reales:
 
-Antes de Guardar hay que **comprobar a mano una de esas líneas**. Si el ERP
-acepta el código, se rellenan las 7 a mano y se guarda.
+| Línea | Venía | **Correcto (ERP)** | Descripción que devuelve el ERP |
+|---|---|---|---|
+| 38 | `1005010028 / HUM` | **`1001040022 / HYR`** | Fiesta Piruleta Corazon Caja 80 Piezas |
+| 43 | `1001010014 / IEH` | **`1001010014 / GEI`** | Carton Palomitas XXL Caja 160 Piezas Estuche Extra Grande |
+| 93 | `1001050004 / GAE` | **ya era correcto** | Goma Granel 1Kg Huevos |
+| 94 | `1001050004 / GEJ` | **ya era correcto** | Haribo Pasta Bas.Fresa.Pic Caja 1,72 Kilos |
+| 95 | `1001050004 / GGC` | **ya era correcto** | Dragibus Bolsa 2 Kilos |
+| 96 | `1001050004 / HBJ` | **ya era correcto** | Lagartones Bolsa 1 Kilo |
+| 98 | `1001050002 / GFX` | **ya era correcto** | Twix Minix 2,5 kg |
+| 99 | `1001050002 / HCG` | **ya era correcto** | Almendra California Blanca Bolsa 1 Kilo |
+| 100 | `1001050002 / HCH` | **ya era correcto** | Almendra California Leche Bolsa 1 Kilo |
+
+**Los 7 códigos/UM del final son BUENOS**: el ERP cargó todas sus
+descripciones en la pantalla de búsqueda. Falló la **lectura del robot**, no
+el dato. En `src/robot_erp.py`, `leer_descripcion()` lee por la posición `$i`
+del DOM; con el grid paginado al final ese índice se descoloca, el robot no
+consigue leer la descripción y **él mismo vacía la línea** (`vaciar()`).
+Prueba: las líneas **92** (`1001050004 / GAD`) y **97** (`1001050004 / HBM`),
+con el mismo código, sí están rellenas en la captura.
+
+Las **2 correcciones nuevas** se han añadido a
+`src/recursos/correcciones_erp.json` con `COINCIDENCIA=POR_NOMBRE` (no tienen
+`ID VISTA` conocido, se buscan comparando el nombre del producto).
+`src/verificar_pedido.py` ya comprueba las **5** correcciones (26, 28, 29,
+38, 43).
+
+**Línea 30:** la encargada confirmó a las 19:17 que la **Tapa Vaso Pequeña/
+Infantil ya NO EXISTE en el ERP**. Se deja vacía. Antes del pedido de 146
+líneas hay que retirar ese producto del catálogo de Flow/CineStock.
 
 > 🔴 **NO SE HA PULSADO GUARDAR.** Revisar con la encargada antes. El vigilante
 > del ID de Solicitud está esperando en la consola negra: no cerrarla.

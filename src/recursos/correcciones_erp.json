@@ -58,6 +58,26 @@
       "UM ERP": "GDE",
       "ESTADO": "CONFIRMADO_ERP",
       "NOTA / REGLA": "Confirmado por la encargada: GDE SI es valida para 1003020099. Las UM son POR ARTICULO: que GDE no valga para Tapa Vaso Mediana no significa que este mal aqui."
+    },
+
+    {
+      "ID VISTA": "",
+      "PRODUCTO": "Piruleta Corazon",
+      "ID ERP": "1001040022",
+      "UM ERP": "HYR",
+      "ESTADO": "CONFIRMADO_ERP",
+      "COINCIDENCIA": "POR_NOMBRE",
+      "NOTA / REGLA": "Verificado en el ERP el 27/10/2026 a las 19:17 (captura de la encargada, Búsqueda Art): 1001040022 / HYR = 'Fiesta Piruleta Corazon Caja 80 Piezas', categoria 100104, precio 10,40. El codigo que traia Flow (1005010028 / HUM) NO EXISTE y fue rechazado en la linea 38 de la carrera de las 18:55. No tiene ID VISTA conocido: se aplica comparando el NOMBRE del producto (COINCIDENCIA=POR_NOMBRE), nunca por ID VISTA."
+    },
+
+    {
+      "ID VISTA": "",
+      "PRODUCTO": "Carton Palomitas XXL",
+      "ID ERP": "1001010014",
+      "UM ERP": "GEI",
+      "ESTADO": "CONFIRMADO_ERP",
+      "COINCIDENCIA": "POR_NOMBRE",
+      "NOTA / REGLA": "Verificado en el ERP el 27/10/2026 a las 19:17 (captura de la encargada, Búsqueda Art): 1001010014 / GEI = 'Carton Palomitas XXL Caja 160 Piezas Estuche Extra Grande', categoria 100101, precio 49,49. El CODIGO era correcto; lo que estaba mal era la UM: IEH fue rechazada en la linea 43 de la carrera de las 18:55. No tiene ID VISTA conocido: se aplica por NOMBRE."
     }
 
   ]
