@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Reaplica el catálogo SUPERMAESTRO a un pedido YA GUARDADO en data/.
+r"""Reaplica las CORRECCIONES ERP a un pedido YA GUARDADO en data/.
 
 ¿Para qué sirve?
 ----------------
@@ -8,6 +8,12 @@ catálogo, así que sigue teniendo los códigos/UM viejos. No basta con volver
 a enviarlo desde el móvil: el receptor (src/receptor.py) IGNORA pedidos
 duplicados por orderId. Este script corrige los archivos ya guardados, sin
 tocar el ERP y sin pedirle nada al móvil.
+
+SOLO se corrigen los artículos de src/recursos/correcciones_erp.json
+(verificados en el ERP). Todo lo demás se deja EXACTAMENTE como lo mandó
+Flow. Es importante: hay familias con variantes que comparten «ID VISTA»
+pero tienen UM distintas (Kit Kat, Skittles...); aplicar el catálogo entero
+cambiaría UMs que ya están bien.
 
 Actualiza:
   * data/pedido_actual.json                        (si existe)
@@ -19,9 +25,15 @@ NO toca:
   * el ERP: este script solo lee/escribe archivos locales
 
 Uso (desde la raíz del proyecto):
+
   python src\regenerar_pedido.py
   python src\regenerar_pedido.py --todos
+  python src\regenerar_pedido.py --restaurar
   python src\regenerar_pedido.py "data\pedidos_para_procesar\pedido_100.json"
+
+  --restaurar  recupera primero la copia .bak_* más reciente de cada archivo.
+               Sirve para deshacer una ejecución anterior y volver a aplicar
+               solo las correcciones buenas.
 
 Antes de sobrescribir, guarda una copia .bak_<fecha> junto a cada archivo.
 """
@@ -38,8 +50,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from catalogo_erp import (  # noqa: E402
     aplicar_a_linea,
-    cargar_catalogo,
-    indice_por_vista,
+    avisos_estado,
+    indice_correcciones,
     no_existentes,
 )
 
@@ -66,6 +78,21 @@ def _lineas_de(datos):
     if isinstance(datos, dict):
         return datos.get("lineas") or datos.get("pedido", {}).get("lineas") or []
     return datos if isinstance(datos, list) else []
+
+
+def _ultimo_backup(ruta):
+    candidatos = sorted(ruta.parent.glob(ruta.name + ".bak_*"))
+    return candidatos[-1] if candidatos else None
+
+
+def restaurar(ruta):
+    copia = _ultimo_backup(ruta)
+    if copia is None:
+        print(f"    [aviso] no hay copia .bak_* de {ruta.name}; se deja como está")
+        return False
+    shutil.copy2(copia, ruta)
+    print(f"    restaurado desde: {copia.name}")
+    return True
 
 
 def corregir_archivo(ruta, indice):
@@ -102,26 +129,30 @@ def corregir_archivo(ruta, indice):
 
 def main():
     ap = argparse.ArgumentParser(
-        description="Reaplica el catálogo SUPERMAESTRO a pedidos ya guardados."
+        description="Reaplica las correcciones ERP a pedidos ya guardados."
     )
     ap.add_argument("archivo", nargs="?", default=None,
                     help="Ruta a un pedido concreto. Si se omite, se corrigen "
                          "pedido_actual.json y el más reciente de pedidos_para_procesar/.")
     ap.add_argument("--todos", action="store_true",
                     help="Corregir TODOS los pedidos de pedidos_para_procesar/.")
+    ap.add_argument("--restaurar", action="store_true",
+                    help="Restaurar primero la copia .bak_* más reciente de cada archivo.")
     args = ap.parse_args()
 
-    productos, avisos = cargar_catalogo()
+    indice = indice_correcciones()
+    correcciones = sum(len(v) for v in indice.values())
+
     print("=" * 78)
-    print("  REGENERAR PEDIDO CON EL CATÁLOGO CORREGIDO")
+    print("  REGENERAR PEDIDO CON LAS CORRECCIONES ERP VERIFICADAS")
     print("=" * 78)
-    print(f"  Catálogo: {len(productos)} productos")
-    for a in avisos:
+    print(f"  Correcciones activas: {correcciones} artículos")
+    print("  (el resto de líneas se dejan EXACTAMENTE como las mandó Flow)")
+    for a in avisos_estado():
         print(f"  [aviso] {a}")
     for nombre in no_existentes():
         print(f"  [aviso] '{nombre}' ya no existe en el ERP: se deja su línea "
               "para que el informe la marque (decisión: LA DEJAMOS).")
-    indice = indice_por_vista(productos)
     print()
 
     if args.archivo:
@@ -143,6 +174,14 @@ def main():
         print(f"  Busqué: {PEDIDO_ACTUAL} y {PROCESAR_DIR / 'pedido_*.json'}")
         return
 
+    if args.restaurar:
+        print("  -- Restaurando copias de seguridad --")
+        for ruta in rutas:
+            if ruta.is_file():
+                print(f"  {ruta.name}")
+                restaurar(ruta)
+        print()
+
     total = 0
     for ruta in rutas:
         if not ruta.is_file():
@@ -153,7 +192,11 @@ def main():
         except Exception as e:
             print(f"  [ERROR] {ruta}: {e}")
             continue
-        print(f"  {ruta.relative_to(BASE_DIR) if ruta.is_relative_to(BASE_DIR) else ruta}")
+        try:
+            nombre = str(ruta.relative_to(BASE_DIR)) if ruta.is_relative_to(BASE_DIR) else str(ruta)
+        except AttributeError:
+            nombre = str(ruta)
+        print(f"  {nombre}")
         print(f"    {n} línea(s) corregida(s) · {nota}")
         for c in cambios:
             print(c)
@@ -162,8 +205,8 @@ def main():
 
     print("=" * 78)
     print(f"  TOTAL: {total} línea(s) corregida(s) en {len(rutas)} archivo(s).")
-    print("  Ahora puedes lanzar el pedido desde CineStock o ejecutar el robot")
-    print("  contra el archivo de pedidos_para_procesar/ indicado arriba.")
+    print("  Comprueba que SOLO aparecen las líneas de los artículos")
+    print("  verificados en el ERP. Las demás NO deben cambiar.")
     print("  NO se ha tocado el ERP; el robot sigue sin pulsar Guardar.")
     print("=" * 78)
 

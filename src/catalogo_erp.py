@@ -19,6 +19,20 @@ Cómo queda:
     sobre el catálogo local: así llegan al PC del cine con un simple git pull
     y un catálogo local desactualizado no puede volver a colar una UM mala.
   * Si no hay catálogo, se AVISA en la consola en vez de fallar en silencio.
+
+¡OJO! (corregido el 27/10/2026 por la tarde)
+--------------------------------------------
+Aplicar el catálogo ENTERO a los pedidos es PELIGROSO: hay productos con
+variantes que comparten «ID VISTA» pero tienen UM distintas (Kit Kat Normal
+HSI / Kit Kat Blanco GBC, Skittle Frutas HWD / Skittle Crazy HWC...).
+La primera versión de este módulo cogía la primera variante y cambiaba UMs
+que ya estaban bien. Por eso:
+
+  - aplicar_a_lineas() e indice_correcciones() usan SOLO las correcciones
+    verificadas de src/recursos/correcciones_erp.json.
+  - cargar_catalogo() (catálogo completo fusionado) se usa ÚNICAMENTE para
+    el endpoint GET /supermaestro, para que Flow pueda descargarlo.
+  - Todo lo que Flow mande bien se deja EXACTAMENTE como viene.
 """
 
 import json
@@ -153,6 +167,60 @@ def indice_por_vista(productos):
     return indice
 
 
+def correcciones_aplicables():
+    """Las ÚNICAS filas que se pueden escribir en un pedido.
+
+    Son exclusivamente las correcciones verificadas en el ERP. Se excluyen
+    las marcadas NO_EXISTE_EN_ERP (no se inventa un código sustituto).
+
+    Esto evita el fallo del 27/10/2026: aplicar las 304 filas del catálogo
+    cambiaba también las UM de familias con variantes (Kit Kat, Skittles...),
+    que ya venían bien de Flow.
+    """
+    out = []
+    for c in correcciones_erp():
+        if str(c.get("ESTADO", "") or "").upper() == "NO_EXISTE_EN_ERP":
+            continue
+        id_erp = str(c.get("ID ERP", "") or "").strip()
+        um_erp = str(c.get("UM ERP", "") or "").strip().split("/")[0].strip()
+        if not id_erp and not um_erp:
+            continue
+        fila = dict(c)
+        fila["ID ERP"] = id_erp
+        fila["UM ERP"] = um_erp
+        out.append(fila)
+    return out
+
+
+def indice_correcciones():
+    """Índice para aplicar a pedidos: SOLO las correcciones verificadas."""
+    return indice_por_vista(correcciones_aplicables())
+
+
+def avisos_estado():
+    """Avisos de diagnóstico para imprimir en la consola del receptor.
+
+    No construye el catálogo entero: solo comprueba qué hay disponible.
+    """
+    avisos = []
+    if not SUPERMAESTRO_LOCAL.is_file() and not SUPERMAESTRO_FLOW.is_file():
+        avisos.append(
+            "No hay catálogo local en data/. Se aplican solo las correcciones "
+            "ERP verificadas (es suficiente)."
+        )
+    if not correcciones_erp():
+        avisos.append(
+            f"AVISO: no se pudo leer {CORRECCIONES_ERP.name}. "
+            "No se corregirá ningún artículo."
+        )
+    for nombre in no_existentes():
+        avisos.append(
+            f"'{nombre}' ya NO EXISTE en el ERP: no se sustituye; "
+            "el informe la marcará."
+        )
+    return avisos
+
+
 def _normaliza(s):
     return "".join(
         ch for ch in unicodedata.normalize("NFKD", str(s or "").lower())
@@ -201,10 +269,14 @@ def aplicar_a_linea(linea, indice):
 
 
 def aplicar_a_lineas(lineas, indice=None):
-    """Aplica el catálogo a una lista de líneas. Devuelve el nº de corregidas."""
+    """Aplica SOLO las correcciones ERP a una lista de líneas.
+
+    Devuelve el nº de líneas corregidas. Si no se pasa índice, se usa
+    indice_correcciones() (nunca el catálogo entero, por el problema de las
+    variantes con UM distintas).
+    """
     if indice is None:
-        productos, _ = cargar_catalogo()
-        indice = indice_por_vista(productos)
+        indice = indice_correcciones()
     corregidas = 0
     for linea in lineas or []:
         if isinstance(linea, dict) and aplicar_a_linea(linea, indice):

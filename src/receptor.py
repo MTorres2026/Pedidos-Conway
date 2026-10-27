@@ -59,8 +59,9 @@ if str(_RUTA_SRC) not in sys.path:
 
 from catalogo_erp import (  # noqa: E402
     aplicar_a_lineas,
+    avisos_estado,
     cargar_catalogo,
-    indice_por_vista,
+    indice_correcciones,
 )
 
 SUPERMAESTRO = BASE_DIR / "data" / "supermaestro_flow.json"  # compatibilidad
@@ -308,17 +309,20 @@ class CineStockRequestHandler(BaseHTTPRequestHandler):
         cuando faltaba data/supermaestro_flow.json, así que NO corregía nada
         y no avisaba. Ahora se avisa siempre y, aunque no haya catálogo local,
         se aplican las correcciones ERP versionadas en src/recursos.
+
+        IMPORTANTE: solo se aplican ESAS correcciones, no el catálogo entero.
+        Hay familias con variantes que comparten ID VISTA pero tienen UM
+        distintas (Kit Kat, Skittles...): aplicar todas las filas cambiaba
+        UMs que ya venían bien de Flow.
         """
-        productos, avisos = cargar_catalogo()
-        for aviso in avisos:
+        for aviso in avisos_estado():
             print(f"[CATÁLOGO] {aviso}")
         try:
             sys.stdout.flush()
         except Exception:
             pass
-        indice = indice_por_vista(productos)
         lineas = data.get("lineas", [])
-        corregidas = aplicar_a_lineas(lineas, indice)
+        corregidas = aplicar_a_lineas(lineas, indice_correcciones())
         if corregidas:
             print(f"[CATÁLOGO] {corregidas} línea(s) corregidas con ID ERP / UM ERP.")
         return data

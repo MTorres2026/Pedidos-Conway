@@ -57,6 +57,27 @@ Tiene **prioridad** sobre `data/supermaestro.json` y `data/supermaestro_flow.jso
 queda en el pedido de 100 líneas; el robot v6b la anotará como incidencia real
 y seguirá hasta la 100. No se inventa un código sustituto.
 
+### ⚠️ Regla crítica: SOLO se corrigen esos artículos
+
+El 27/10/2026 por la tarde detectamos que aplicar el catálogo **entero**
+(304 productos) a los pedidos cambiaba también las UM de familias con
+variantes que comparten `ID VISTA`:
+
+```
+línea 71 | Kit Kat Normal   | HSI -> GBC   (MAL)
+línea 81 | Skittle Frutas   | HWD -> HWC   (MAL)
+```
+
+Esas UM venían bien de Flow. Por eso `src/catalogo_erp.py` ahora aplica
+**únicamente** las correcciones de `src/recursos/correcciones_erp.json`.
+Todo lo demás se deja exactamente como lo mandó Flow. El catálogo completo
+fusionado se sigue sirviendo en `GET /supermaestro` para que Flow pueda
+descargarlo, pero **no se usa para reescribir pedidos**.
+
+Al ejecutar `regenerar_pedido.py` deben aparecer **solo 3 líneas corregidas**
+por archivo (Bolsa Asa Papel, Cuchara Madera, Tapa Vaso Mediana). Si aparece
+cualquier otra línea, **no lances el robot** y avisa.
+
 ---
 
 ## 3. Archivos nuevos / cambiados en esta sesión
@@ -97,6 +118,17 @@ El `.env` NO se toca: ya lo tienes con `ERP_USER` / `ERP_PASS`. Nunca se sube.
 
 ### Regenerar el pedido de 100 líneas
 
+**Si ya ejecutaste `regenerar_pedido.py` ANTES del arreglo de la tarde**
+(es decir, si su salida mencionaba Kit Kat Normal o Skittle Frutas), ejecuta
+primero esto para deshacer esos dos cambios:
+
+```
+python src\regenerar_pedido.py --restaurar
+```
+
+`--restaurar` recupera la copia `.bak_*` más reciente de cada pedido y vuelve
+a aplicar **solo las correcciones buenas**. Si es la primera vez, basta con:
+
 ```
 python src\regenerar_pedido.py
 ```
@@ -104,7 +136,13 @@ python src\regenerar_pedido.py
 Esto corrige `data/pedido_actual.json` y el archivo más reciente de
 `data/pedidos_para_procesar/`, guardando una copia `.bak_<fecha>` de cada uno.
 Te imprimirá línea por línea lo que cambia. **Pégame ese texto antes de lanzar
-el robot.**
+el robot.** Deben salir exactamente **3 líneas por archivo**:
+
+```
+(CI) Bolsa Asa Papel      1003020091 / IAH -> 1003020091 / ICG
+(CI) Cuchara Madera       1003020087 / IDV -> 1003020096 / GDE
+(CI) Tapa Vaso Mediana    1003020030 / GDE -> 1003020030 / CJA
+```
 
 > No intentes reenviar el mismo pedido desde el móvil: el receptor lo ignora
 > por `orderId` duplicado. Para eso existe `regenerar_pedido.py`.
