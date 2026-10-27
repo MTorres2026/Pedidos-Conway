@@ -275,7 +275,36 @@ ERP_PASS=la_contraseña_de_aqui
 
 ---
 
-## 8. Pendiente (mejora futura, tarea 6)
+## 8. Copias de seguridad (27/10/2026)
+
+**NO usar el típico `.bat` de «backup automático» que hace
+`git add .` + `git pull origin main` + `git push origin main`.** Motivos:
+
+1. Empuja a **`main`**, no a `arena/67d0fffb-pedidos-conway`. Mezclaría los
+   cambios locales de otra sesión con la rama de trabajo.
+2. `git pull origin main --no-rebase` puede crear un **merge con conflictos**
+   y el `.bat` sigue hasta el `push` igualmente (no comprueba errores).
+3. `.env` y `data/` están en `.gitignore`, pero un `git add .` **sí subiría**
+   `dist/` (más de 100 MB entre `CineStock.exe` y sus DLL) y `build/`.
+4. Si `.env` llegó a estar rastreado en algún momento, `.gitignore` **ya no lo
+   protege** (`git add .` lo seguiría incluyendo).
+5. `git add .` también podría colar informes, capturas o experimentos v7.
+
+**Lo que ya está a salvo:** todo el código importante (robot v6b,
+correcciones, receptor, regenerador, documentación) está subido en la rama
+`arena/67d0fffb-pedidos-conway`. No hace falta ningún script para eso.
+
+**Lo que NO está en GitHub, y NO debe estarlo:** `data/` (pedidos, catálogo,
+copias `.bak_*`) y `.env` (credenciales). Para eso existe
+**`herramientas/copia_seguridad_local.bat`**: crea un ZIP fechado en
+`C:\Users\Marku\Desktop\BACKUPS-CineStock` **solo en el PC**, sin tocar Git.
+Es seguro ejecutarlo incluso justo antes de una carrera del robot.
+
+> Recordatorio: el `.env` del PC del cine se crea **a mano** y nunca se sube.
+
+---
+
+## 9. Pendiente (mejora futura, tarea 6)
 
 Validar en CineStock, antes de pulsar «Enviar a ERP», que cada `idErp` y cada
 `umErp` existen en el catálogo y que el artículo no esté marcado como

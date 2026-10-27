@@ -11,6 +11,18 @@ __pycache__/
 venv/
 env/
 
+# --- Copias y compilados pesados -------------------------------------------
+# Un "git add ." sin querer meteria el CineStock.exe y todos sus DLL (dist/
+# pesa mas de 100 MB). OJO: dist/ y build/ YA tienen archivos rastreados en
+# main; esta regla solo impide que se cuelen archivos NUEVOS. No sustituye a
+# revisar "git status" antes de subir nada.
+build/
+dist/
+*.zip
+*.7z
+*.rar
+*.bak_*
+
 # --- Informes, capturas y backups que genera el robot (src/robot_erp.py) ---
 # No son código: son salidas de cada carrera. Se quedan en cada PC.
 src/errores_pedido_*.txt
