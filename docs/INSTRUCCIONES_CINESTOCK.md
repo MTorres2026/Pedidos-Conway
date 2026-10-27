@@ -3,12 +3,12 @@
 > Documento de apoyo. La regla sigue siendo: **el robot NUNCA pulsa Guardar**.
 > Tú revisas el pedido en Chrome y guardas a mano.
 
-> ⚠️ **ESTADO DE LA SUBIDA (27/10/2026):** en la rama
-> `arena/67d0fffb-pedidos-conway` ya están el catálogo corregido, el receptor,
-> los parcheadores y el comprobador. Falta **un solo archivo**:
-> `src/robot_erp.py` con la v6b. Hasta que se suba, el `robot_erp.py` de la rama
-> sigue siendo la versión base (sin parches). **No hagas el `git pull` en el PC
-> del cine todavía.** En tu PC el v6b ya está y se queda como está.
+> ✅ **ESTADO DE LA SUBIDA (27/10/2026): COMPLETO.** En la rama
+> `arena/67d0fffb-pedidos-conway` están el robot **v6b** (el archivo exacto del
+> PC de la encargada, verificado con `comprobar version robot.py`), el catálogo
+> corregido, el receptor, los parcheadores y el comprobador.
+> `data/` y `.env` siguen FUERA de Git. Ya se puede hacer `git pull` en el PC
+> del cine.
 
 ---
 
