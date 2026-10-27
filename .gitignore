@@ -23,6 +23,10 @@ dist/
 *.rar
 *.bak_*
 
+# EXCEPCION: el paquete de actualizacion para el PC del cine SI se sube,
+# para poder descargarlo desde GitHub. Es el unico ZIP permitido.
+!ACTUALIZACION_CINE.zip
+
 # --- Informes, capturas y backups que genera el robot (src/robot_erp.py) ---
 # No son código: son salidas de cada carrera. Se quedan en cada PC.
 src/errores_pedido_*.txt
