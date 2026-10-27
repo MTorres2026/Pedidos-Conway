@@ -219,6 +219,25 @@ Salida verificada de `python src\regenerar_pedido.py --restaurar`:
   .../HWD`, `Estuchado (3)`, `Haribo (8)`. Es decir, las dos UM que se habían
   estropeado por la mañana (`HSI` y `HWD`) están de vuelta.
 
+### Antes de lanzar: verificar el JSON (OBLIGATORIO)
+
+```
+python src\verificar_pedido.py
+```
+
+`src/verificar_pedido.py` es **solo de lectura**: confirma que hay 100 líneas,
+que las 3 correcciones están en el archivo, que la línea 30 sigue intacta y
+que las familias conservan sus UM. Debe acabar con **`RESULTADO: TODO OK`**.
+Si dice `PROBLEMA`, **no lances el robot**: ejecuta
+`python src\regenerar_pedido.py --restaurar` y vuelve a verificar.
+
+Motivo: el 27/10/2026 a las 14:29 se lanzó una carrera con el JSON **todavía
+sin corregir** (informe `src/errores_pedido_20261027_143749.txt`). En su tabla
+se veía `línea 26 / IAH`, `línea 28 / 1003020087 / IDV`, `línea 29 / GDE`.
+Además, pulsar «Enviar a ERP» desde la pestaña **Pedidos** de CineStock
+reescribe el JSON desde la memoria y puede borrar las correcciones. La
+verificación lo detecta antes de perder 10–15 minutos.
+
 ### Comando exacto para lanzar el pedido de 100 líneas
 
 Desde la **raíz del proyecto**, con el `.env` ya creado:
