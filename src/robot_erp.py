@@ -11,7 +11,6 @@ import json
 import os
 import re
 import sys
-import threading
 import time
 import getpass
 import unicodedata
@@ -651,29 +650,17 @@ def recuperar(driver):
             break
 
 
-def verificar_pantalla_activa(driver, elem_id="REQ_LINE_WRK_INV_ITEM_ID$0", timeout=5):
-    try:
-        ir_a_elemento(driver, elem_id, timeout=timeout)
-        return True
-    except TimeoutError:
-        return False
 
 
-def mostrar_ventana(titulo, texto, error=True, estado_vigilante=None):
+def mostrar_ventana(titulo, texto, error=True):
     try:
         import tkinter as tk
         root = tk.Tk()
         root.title(titulo)
         root.attributes("-topmost", True)
-        cabecera = tk.Label(
-            root,
-            text=("ATENCIÓN: hay líneas que revisar" if error else "Carga finalizada"),
-            font=("Segoe UI", 14, "bold"),
-            fg="white",
-            bg=("#b00020" if error else "#1b6e2f"),
-            pady=8,
-        )
-        cabecera.pack(fill="x")
+        tk.Label(root, text=("ATENCIÓN: hay líneas que revisar" if error else "Carga finalizada"),
+                 font=("Segoe UI", 14, "bold"), fg="white",
+                 bg=("#b00020" if error else "#1b6e2f"), pady=8).pack(fill="x")
         marco = tk.Frame(root)
         marco.pack(fill="both", expand=True, padx=8, pady=8)
         sb = tk.Scrollbar(marco)
@@ -686,50 +673,13 @@ def mostrar_ventana(titulo, texto, error=True, estado_vigilante=None):
         txt.config(state="disabled")
 
         def copiar():
-            contenido = txt.get("1.0", "end-1c")
             root.clipboard_clear()
-            root.clipboard_append(contenido)
+            root.clipboard_append(texto)
             root.update()
         barra = tk.Frame(root)
         barra.pack(pady=(0, 8))
         tk.Button(barra, text="Copiar", command=copiar, width=14).pack(side="left", padx=6)
         tk.Button(barra, text="Cerrar", command=root.destroy, width=14).pack(side="left", padx=6)
-
-        if isinstance(estado_vigilante, dict):
-            notificado = [False]
-
-            def _revisar_vigilante():
-                try:
-                    id_sol = estado_vigilante.get("id_solicitud")
-                    if id_sol and not notificado[0]:
-                        notificado[0] = True
-                        cabecera.config(
-                            text=f"✅ ID de Solicitud {id_sol} guardado en CineStock",
-                            bg="#1b6e2f",
-                        )
-                        txt.config(state="normal")
-                        txt.insert(
-                            "1.0",
-                            f"✅ ID de Solicitud detectado y anotado automáticamente en CineStock: {id_sol}\n"
-                            "Ya puedes cerrar esta ventana.\n"
-                            + ("-" * 75) + "\n\n",
-                        )
-                        txt.see("1.0")
-                        txt.config(state="disabled")
-                        root.lift()
-                        if not error:
-                            root.after(4000, root.destroy)
-                        return
-                    if estado_vigilante.get("fin"):
-                        if not error:
-                            root.after(1500, root.destroy)
-                        return
-                    root.after(400, _revisar_vigilante)
-                except Exception:
-                    pass
-
-            root.after(400, _revisar_vigilante)
-
         root.update_idletasks()
         root.lift()
         root.focus_force()
@@ -886,39 +836,52 @@ JS_CONTAR_FILAS = ("return document.querySelectorAll("
                    "\"input[id^='REQ_LINE_WRK_INV_ITEM_ID$']\").length;")
 
 
-def contar_filas(driver):
-    ir_a_elemento(driver, "REQ_LINE_WRK_INV_ITEM_ID$0", timeout=15)
-    return driver.execute_script(JS_CONTAR_FILAS)
 
 
-def crear_filas(driver, wait, total, inf):
+def crear_filas(driver, wait, total, inf, ya_creadas=1):
+    """Crea filas hasta llegar a «total», EN TANDAS (nunca todas de golpe).
+
+    Se usa SOLO para la primera tanda (llenar la primera página)."""
     if total <= 1:
-        return 1
-    print(f"4. Añadiendo {total - 1} filas nuevas...")
-    existentes = 1
-    for intento in (1, 2):
-        faltan = total - existentes
-        if faltan <= 0:
-            break
+        return max(1, ya_creadas)
+    existentes = ya_creadas
+    TAM_TANDA = 20
+    sin_progreso = 0
+    while existentes < total:
+        faltan = min(TAM_TANDA, total - existentes)
+        nuevo = existentes
         try:
-            ir_a_elemento(driver, "REQ_LINE_WRK_INV_ITEM_ID$0")
+            ir_a_grid(driver, timeout=20)
             esperar_psoft(driver)
             driver.execute_script(f"window.prompt = function(t) {{ return '{faltan}'; }};")
             boton_mas = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "img.PTROWADDMULTI")))
             driver.execute_script("arguments[0].click();", boton_mas)
-            esperar_psoft(driver)
+            objetivo = existentes + faltan - 1
             try:
-                ir_a_elemento(driver, f"REQ_LINE_WRK_INV_ITEM_ID${total - 1}", timeout=30)
+                ir_a_elemento(driver, f"REQ_LINE_WRK_INV_ITEM_ID${objetivo}", timeout=90)
             except Exception:
                 pass
-            existentes = contar_filas(driver)
+            esperar_psoft(driver, timeout=30)
+            nuevo = contar_filas(driver)
         except Exception as e:
-            print(f"   [aviso] intento {intento} de crear filas falló: {resumen_error(e)}")
+            print(f"   [aviso] la tanda de {faltan} filas falló: {resumen_error(e)}")
             try:
+                esperar_psoft(driver, timeout=60)
                 recuperar(driver)
-                existentes = contar_filas(driver)
+                nuevo = contar_filas(driver)
             except Exception:
-                pass
+                nuevo = existentes
+        if nuevo > existentes:
+            sin_progreso = 0
+            existentes = nuevo
+            print(f"   Tanda lista: hay {existentes} filas en pantalla (objetivo {total})")
+        else:
+            sin_progreso += 1
+            if sin_progreso >= 2:
+                print("   El ERP no añade más filas; sigo con las que hay.")
+                break
+            TAM_TANDA = max(5, TAM_TANDA // 2)
+            print(f"   Reintento con tandas más pequeñas: {TAM_TANDA}...")
     if existentes < total:
         inf.general(f"Solo hay {existentes} filas en la pantalla de {total} necesarias",
                     "las líneas que no caben se han marcado abajo; añádelas a mano")
@@ -993,21 +956,220 @@ def limpiar_fila(driver, i, um_id=None):
         return False
 
 
-def procesar_fila(driver, i, fila, inf, n_pantalla):
+
+
+def escribir_campo_grid(driver, elem_id, valor, intentos=5, confirmar_con=Keys.TAB,
+                        verificar=True, ventanas=False, pre=0.3, asentar=0.7):
+    """Como escribir_campo, pero pensado para las filas del grid: lleva el
+    scroll y el foco al campo con JAVASCRIPT (los clics de ratón van por
+    coordenadas de pantalla y, con el grid largo, podían caer en otra fila)."""
+    valor = str(valor)
+    for n in range(1, intentos + 1):
+        ir_a_elemento(driver, elem_id)
+        esperar_psoft(driver)
+        time.sleep(pre if n == 1 else 1.5)
+        el = driver.find_element(By.ID, elem_id)
+        driver.execute_script("arguments[0].scrollIntoView({block:'center'});", el)
+        time.sleep(0.2)
+        driver.execute_script("arguments[0].focus(); arguments[0].select();", el)
+        time.sleep(0.1)
+        activo = driver.execute_script(
+            "return document.activeElement ? document.activeElement.id : null;")
+        if activo != elem_id:
+            try:
+                ActionChains(driver).move_to_element(el).click().perform()
+            except WebDriverException:
+                driver.execute_script("arguments[0].focus();", el)
+            time.sleep(0.1)
+            activo = driver.execute_script(
+                "return document.activeElement ? document.activeElement.id : null;")
+            if activo != elem_id:
+                driver.execute_script("arguments[0].focus(); arguments[0].select();", el)
+                time.sleep(0.1)
+        el.send_keys(Keys.CONTROL, "a")
+        el.send_keys(Keys.DELETE)
+        el.send_keys(valor)
+        el.send_keys(confirmar_con)
+        esperar_psoft(driver)
+        if asentar:
+            time.sleep(asentar)
+            esperar_psoft(driver)
+        if ventanas:
+            n_ven, textos = cerrar_ventanas(driver, elem_id, ya_esperado=True)
+            _ULTIMO_AVISO["textos"].extend(textos)
+            if n_ven:
+                print(f"      {n_ven} ventana(s) cerradas con Aceptar tras '{elem_id}' "
+                      f"(texto: {textos[0][:90]!r})")
+            tipo_error, _ = _clasificar_error(textos)
+            if tipo_error == "fatal":
+                _ULTIMO_AVISO["es_fatal"] = True
+                return False
+            if tipo_error == "no_valido":
+                return False
+        else:
+            msg = descartar_mensaje(driver)
+            if msg:
+                _ULTIMO_AVISO["textos"].append(msg)
+                tipo_error, _ = _clasificar_error([msg])
+                if tipo_error == "fatal":
+                    _ULTIMO_AVISO["es_fatal"] = True
+                    return False
+                print(f"      MENSAJE DEL ERP en '{elem_id}': {limpiar(msg, 120)}")
+        if not verificar:
+            return True
+        try:
+            actual = leer_valor(driver, elem_id)
+        except Exception:
+            actual = ""
+        if _iguales(actual, valor):
+            return True
+        if valor and actual:
+            largo_actual = len(actual)
+            if 0 < largo_actual < len(valor) * 0.5:
+                print(f"      intento {n}: '{elem_id}' quedó TRUNCADO: '{actual}' (esperado '{valor}')")
+                break
+        print(f"      intento {n}: '{elem_id}' quedó con '{actual}' (esperado '{valor}')")
+        if n == 2:
+            diagnostico_inputs(driver, elem_id)
+    return False
+
+
+
+
+def escribir_campo_grid(driver, elem_id, valor, intentos=5, confirmar_con=Keys.TAB,
+                        verificar=True, ventanas=False, pre=0.3, asentar=0.7):
+    """Como escribir_campo, pero pensado para las filas del grid: lleva el
+    scroll y el foco al campo con JAVASCRIPT (los clics de ratón van por
+    coordenadas de pantalla y, con el grid largo, podían caer en otra fila)."""
+    valor = str(valor)
+    for n in range(1, intentos + 1):
+        ir_a_elemento(driver, elem_id)
+        esperar_psoft(driver)
+        time.sleep(pre if n == 1 else 1.5)
+        el = driver.find_element(By.ID, elem_id)
+        driver.execute_script("arguments[0].scrollIntoView({block:'center'});", el)
+        time.sleep(0.2)
+        driver.execute_script("arguments[0].focus(); arguments[0].select();", el)
+        time.sleep(0.1)
+        activo = driver.execute_script(
+            "return document.activeElement ? document.activeElement.id : null;")
+        if activo != elem_id:
+            try:
+                ActionChains(driver).move_to_element(el).click().perform()
+            except WebDriverException:
+                driver.execute_script("arguments[0].focus();", el)
+            time.sleep(0.1)
+            activo = driver.execute_script(
+                "return document.activeElement ? document.activeElement.id : null;")
+            if activo != elem_id:
+                driver.execute_script("arguments[0].focus(); arguments[0].select();", el)
+                time.sleep(0.1)
+        el.send_keys(Keys.CONTROL, "a")
+        el.send_keys(Keys.DELETE)
+        el.send_keys(valor)
+        el.send_keys(confirmar_con)
+        esperar_psoft(driver)
+        if asentar:
+            time.sleep(asentar)
+            esperar_psoft(driver)
+        if ventanas:
+            n_ven, textos = cerrar_ventanas(driver, elem_id, ya_esperado=True)
+            _ULTIMO_AVISO["textos"].extend(textos)
+            if n_ven:
+                print(f"      {n_ven} ventana(s) cerradas con Aceptar tras '{elem_id}' "
+                      f"(texto: {textos[0][:90]!r})")
+            tipo_error, _ = _clasificar_error(textos)
+            if tipo_error == "fatal":
+                _ULTIMO_AVISO["es_fatal"] = True
+                return False
+            if tipo_error == "no_valido":
+                return False
+        else:
+            msg = descartar_mensaje(driver)
+            if msg:
+                _ULTIMO_AVISO["textos"].append(msg)
+                tipo_error, _ = _clasificar_error([msg])
+                if tipo_error == "fatal":
+                    _ULTIMO_AVISO["es_fatal"] = True
+                    return False
+                print(f"      MENSAJE DEL ERP en '{elem_id}': {limpiar(msg, 120)}")
+        if not verificar:
+            return True
+        try:
+            actual = leer_valor(driver, elem_id)
+        except Exception:
+            actual = ""
+        if _iguales(actual, valor):
+            return True
+        if valor and actual:
+            largo_actual = len(actual)
+            if 0 < largo_actual < len(valor) * 0.5:
+                print(f"      intento {n}: '{elem_id}' quedó TRUNCADO: '{actual}' (esperado '{valor}')")
+                break
+        print(f"      intento {n}: '{elem_id}' quedó con '{actual}' (esperado '{valor}')")
+        if n == 2:
+            diagnostico_inputs(driver, elem_id)
+    return False
+
+
+def _en_frame_todos(driver, fn, nivel=0):
+    """Ejecuta fn() en el documento actual y en todos los frames anidados."""
+    try:
+        if fn():
+            return True
+    except WebDriverException:
+        pass
+    if nivel >= 4:
+        return False
+    total = len(driver.find_elements(By.CSS_SELECTOR, "iframe,frame"))
+    for i in range(total):
+        try:
+            driver.switch_to.frame(i)
+        except WebDriverException:
+            continue
+        try:
+            if _en_frame_todos(driver, fn, nivel + 1):
+                return True
+        finally:
+            _subir_frame(driver)
+    return False
+
+
+def _click_paginador(driver, texto, timeout=15):
+    """Pulsa un enlace del paginador del grid («Último», «Primero»...), si existe."""
+    def _buscar():
+        for e in driver.find_elements(By.XPATH,
+                "//a[normalize-space(.)='" + texto + "'] | //button[normalize-space(.)='" + texto + "']"):
+            try:
+                if e.is_displayed():
+                    driver.execute_script("arguments[0].click();", e)
+                    return True
+            except WebDriverException:
+                continue
+        return False
+    driver.switch_to.default_content()
+    ok = _en_frame_todos(driver, _buscar)
+    if ok:
+        esperar_psoft(driver, timeout=timeout)
+    return ok
+
+
+def procesar_fila(driver, i, fila_datos, inf, n_pantalla, fila_dom=None):
     n = i + 1
-    art = str(fila["articulo"]).strip()
-    um = "" if pd.isna(fila["um"]) else str(fila["um"]).strip().upper()
+    art = str(fila_datos["articulo"]).strip()
+    um = "" if pd.isna(fila_datos["um"]) else str(fila_datos["um"]).strip().upper()
     producto = ""
-    if "producto" in fila.index and pd.notna(fila["producto"]):
-        producto = str(fila["producto"]).strip()
-    cant_orig = fila["cantidad"]
+    if "producto" in fila_datos.index and pd.notna(fila_datos["producto"]):
+        producto = str(fila_datos["producto"]).strip()
+    cant_orig = fila_datos["cantidad"]
     qty = str(cant_orig)
+    fila = i if fila_dom is None else fila_dom   # fila real del grid ($n del DOM)
 
     def err(motivo, detalle=""):
         inf.linea(n, art, qty, um, producto, motivo, detalle)
 
     def vaciar(um_id=None):
-        ok = limpiar_fila(driver, i, um_id)
+        ok = limpiar_fila(driver, fila, um_id)
         if not ok:
             err("No se pudo vaciar la línea", "bórrala a mano: si no, el ERP seguirá mostrando 'Valor no válido'")
         return ok
@@ -1025,13 +1187,24 @@ def procesar_fila(driver, i, fila, inf, n_pantalla):
         err("Dato incorrecto en el archivo de datos: falta la UM")
         print(f"   Fila {n}: ¡falta la UM en el archivo, se omite!")
         return
-    if i >= n_pantalla:
+    if fila_dom is None and i >= n_pantalla:
         err("La fila no existe en la pantalla del ERP", "no se pudieron crear todas las filas")
         print(f"   Fila {n}: ¡la fila no existe en la pantalla, se omite!")
         return
     print(f"   Fila {n}: {art} | {qty} | {um}")
     t_fila = time.time()
     t_esp0 = _T_ESPERA[0]
+    # --- si la fila i de la pantalla ya tiene algo, buscar la primera fila libre ---
+    try:
+        contenido = "" if fila_dom is not None else leer_valor(driver, f"REQ_LINE_WRK_INV_ITEM_ID${i}", timeout=4).strip()
+        if contenido:
+            libre = _primera_fila_libre(driver, i + 60)
+            if libre is not None and libre != i:
+                print(f"      [aviso] la fila de pantalla {i + 1} no estaba libre; "
+                      f"escribo en la fila {libre + 1} (alineación corregida)")
+                fila = libre
+    except Exception:
+        pass
     if n % 10 == 0:
         if not verificar_pantalla_activa(driver):
             inf.fatal = "Se cambió de pantalla durante la carga (probablemente navegación errónea del ERP)"
@@ -1061,13 +1234,13 @@ def procesar_fila(driver, i, fila, inf, n_pantalla):
                     inf.linea(*prev, "No se pudo vaciar la línea", "bórrala a mano")
     except Exception as e:
         print(f"      [diag] fallo al procesar errores pendientes: {e}")
-    _CTX_PREV.update(fila=(n, art, qty, um, producto), i=i, um_id=None)
-    art_id = f"REQ_LINE_WRK_INV_ITEM_ID${i}"
+    _CTX_PREV.update(fila=(n, art, qty, um, producto), i=fila, um_id=None)
+    art_id = f"REQ_LINE_WRK_INV_ITEM_ID${fila}"
     _ULTIMO_AVISO["textos"] = []
     _ULTIMO_AVISO["es_fatal"] = False
     try:
-        ok_a = escribir_campo(driver, art_id, art, confirmar_con=Keys.ENTER,
-                              ventanas=True, pre=0.1, asentar=0)
+        ok_a = escribir_campo_grid(driver, art_id, art, confirmar_con=Keys.ENTER,
+                                   ventanas=True, pre=0.1, asentar=0)
         if _ULTIMO_AVISO["es_fatal"]:
             inf.fatal = f"Error fatal en línea {n} al escribir artículo"
             return
@@ -1082,7 +1255,7 @@ def procesar_fila(driver, i, fila, inf, n_pantalla):
         print(f"      ¡artículo: {resumen_error(e)}!")
         recuperar(driver)
         return
-    t_art = time.time()
+    t_art = time.time() - t_fila
     textos = list(_ULTIMO_AVISO["textos"])
     if _es_no_valido(textos):
         err("El ERP no reconoce el artículo (Valor no válido)", "comprueba que el código existe; la línea queda vacía")
@@ -1097,12 +1270,12 @@ def procesar_fila(driver, i, fila, inf, n_pantalla):
         print(f"      ¡el artículo {art} no se quedó escrito! Fila {n} omitida y vaciada.")
         vaciar()
         return
-    desc = leer_descripcion(driver, i)
+    desc = leer_descripcion(driver, fila)
     if desc is not None and not desc:
         for _ in range(3):
             time.sleep(0.5)
             esperar_psoft(driver, timeout=3)
-            desc = leer_descripcion(driver, i) or ""
+            desc = leer_descripcion(driver, fila) or ""
             if desc:
                 break
     if desc:
@@ -1117,7 +1290,7 @@ def procesar_fila(driver, i, fila, inf, n_pantalla):
     _ULTIMO_AVISO["textos"] = []
     _ULTIMO_AVISO["es_fatal"] = False
     try:
-        ok_q = escribir_campo(driver, f"REQ_LINE_QTY_REQ${i}", qty, pre=0.1, asentar=0.2)
+        ok_q = escribir_campo_grid(driver, f"REQ_LINE_QTY_REQ${fila}", qty, pre=0.1, asentar=0.2)
         if _ULTIMO_AVISO["es_fatal"]:
             inf.fatal = f"Error fatal en línea {n} al escribir cantidad"
             return
@@ -1138,7 +1311,7 @@ def procesar_fila(driver, i, fila, inf, n_pantalla):
     ok_u = False
     um_id = None
     try:
-        um_id = encontrar_id_um(driver, i, f"REQ_LINE_QTY_REQ${i}")
+        um_id = encontrar_id_um(driver, fila, f"REQ_LINE_QTY_REQ${fila}")
         _CTX_PREV["um_id"] = um_id
         if um_id:
             try:
@@ -1147,8 +1320,8 @@ def procesar_fila(driver, i, fila, inf, n_pantalla):
                 if activo != um_id:
                     driver.execute_script(f"document.getElementById('{um_id}').focus();")
                     time.sleep(0.2)
-                ok_u = escribir_campo(driver, um_id, um, intentos=1, verificar=False,
-                                      confirmar_con=Keys.ENTER, ventanas=True, pre=0.1, asentar=0)
+                ok_u = escribir_campo_grid(driver, um_id, um, intentos=1, verificar=False,
+                                           confirmar_con=Keys.ENTER, ventanas=True, pre=0.1, asentar=0)
             except Exception as e:
                 print(f"      UM por ID falló ({resumen_error(e)}); escribo en el campo con foco...")
                 um_id = None
@@ -1175,8 +1348,8 @@ def procesar_fila(driver, i, fila, inf, n_pantalla):
                     print("      UM vacía tras las ventanas; buscando ventanas en todos los frames...")
                     descartar_mensaje(driver, profundo=True)
                     try:
-                        ok_u = escribir_campo(driver, um_id, um, intentos=1, verificar=False,
-                                              confirmar_con=Keys.ENTER, ventanas=True, pre=0.1, asentar=0)
+                        ok_u = escribir_campo_grid(driver, um_id, um, intentos=1, verificar=False,
+                                                   confirmar_con=Keys.ENTER, ventanas=True, pre=0.1, asentar=0)
                     except Exception:
                         break
     except Exception as e:
@@ -1235,52 +1408,22 @@ return r;
 """
 
 
-def verificar_final(driver, datos, inf):
-    print("6. Verificación final de las líneas...")
-    try:
-        ir_a_elemento(driver, "REQ_LINE_WRK_INV_ITEM_ID$0", timeout=10)
-        valores = driver.execute_script(JS_LEER_LINEAS, len(datos), _UM_INFO["patron"])
-    except Exception as e:
-        inf.general("No se pudo hacer la verificación final de las líneas", resumen_error(e))
-        return
-    descs = None
-    if _DESC["fiable"]:
-        try:
-            descs = driver.execute_script(JS_DESC_TODAS, len(datos))
-        except Exception:
-            descs = None
-    for i, (a, q, u) in enumerate(valores):
-        n = i + 1
-        if n in inf.lineas:
-            continue
-        fila = datos.iloc[i]
-        art = str(fila["articulo"]).strip()
-        um = str(fila["um"]).strip().upper()
-        prod = str(fila["producto"]).strip() if ("producto" in datos.columns and pd.notna(fila["producto"])) else ""
-        try:
-            qty = fmt_cantidad(fila["cantidad"])
-        except Exception:
-            qty = str(fila["cantidad"])
-        if a is None:
-            inf.linea(n, art, qty, um, prod, "Verificación final: la fila no existe en pantalla")
-            continue
-        a_clean = a.strip()
-        if a_clean != art:
-            if art.startswith(a_clean) and len(a_clean) < len(art) * 0.7:
-                inf.linea(n, art, qty, um, prod, "Verificación final: artículo TRUNCADO en pantalla",
-                          f"aparece '{a_clean}' (primeros {len(a_clean)} de {len(art)} caracteres)")
-            else:
-                inf.linea(n, art, qty, um, prod, "Verificación final: artículo distinto en pantalla",
-                          f"aparece '{a_clean}'")
-        if q is not None and not _iguales(q, qty):
-            inf.linea(n, art, qty, um, prod, "Verificación final: cantidad distinta en pantalla",
-                      f"aparece '{q.strip()}', debería ser {qty}")
-        if u is not None and u.strip().upper() != um:
-            inf.linea(n, art, qty, um, prod, "Verificación final: UM distinta o vacía en pantalla",
-                      f"aparece '{u.strip()}', debería ser {um}")
-        if descs and i < len(descs) and descs[i] == "" and a_clean:
-            inf.linea(n, art, qty, um, prod, "Verificación final: el producto no tiene descripción",
-                      "el ERP no lo ha reconocido")
+JS_LEER_TODAS_DOM = """
+var pat = arguments[0];
+var inputs = document.querySelectorAll("input[id^='REQ_LINE_WRK_INV_ITEM_ID$']");
+var r = {};
+for (var k = 0; k < inputs.length; k++) {
+  var m = inputs[k].id.split('$');
+  var i = parseInt(m[m.length - 1], 10);
+  if (isNaN(i)) continue;
+  var q = document.getElementById('REQ_LINE_QTY_REQ$' + i);
+  var u = pat ? document.getElementById(pat.replace('{}', i)) : null;
+  r[i] = [inputs[k].value, q ? q.value : null, u ? u.value : null];
+}
+return r;
+"""
+
+
 
 
 def _marcar_pendientes(inf, datos, desde, motivo):
@@ -1288,30 +1431,8 @@ def _marcar_pendientes(inf, datos, desde, motivo):
         inf.linea(*_datos_linea(datos, j), motivo)
 
 
-def cargar_lineas(driver, wait, datos, inf):
-    n_pantalla = crear_filas(driver, wait, len(datos), inf)
-    print("5. Rellenando líneas...")
-    for i in range(len(datos)):
-        fila = datos.iloc[i]
-        try:
-            procesar_fila(driver, i, fila, inf, n_pantalla)
-            if inf.fatal:
-                if (i + 1) not in inf.lineas:
-                    inf.linea(*_datos_linea(datos, i), "Línea en la que se detuvo el programa (revísala)")
-                _marcar_pendientes(inf, datos, i + 1, "No se llegó a procesar (error fatal anterior)")
-                return
-        except KeyboardInterrupt:
-            raise
-        except Exception as e:
-            n = i + 1
-            inf.linea(*_datos_linea(datos, i), "Error inesperado en esta línea", resumen_error(e))
-            print(f"      ¡Fila {n}: error inesperado ({resumen_error(e)})! Sigo con la siguiente.")
-            if not chrome_vivo(driver):
-                inf.fatal = "Se cerró la ventana de Chrome durante la carga."
-                _marcar_pendientes(inf, datos, i + 1, "No se llegó a procesar (Chrome se cerró)")
-                return
-            recuperar(driver)
-    verificar_final(driver, datos, inf)
+
+
 
 
 EXT_SOPORTADAS = (".xlsx", ".xlsm", ".xls", ".ods", ".csv", ".tsv", ".txt", ".json", ".jsonl",
@@ -1750,6 +1871,588 @@ def cargar_datos(archivo_forzado=None):
     return ruta, df, info
 
 
+JS_HAY_FILA = "return document.querySelectorAll(\"input[id^='REQ_LINE_WRK_INV_ITEM_ID$']\").length > 0;"
+
+JS_FILAS_VISIBLES = """
+var r = [];
+document.querySelectorAll("input[id^='REQ_LINE_WRK_INV_ITEM_ID$']").forEach(function(e){
+  var i = parseInt(e.id.split('$').pop(), 10);
+  if (!isNaN(i)) r.push([i, (e.value || '').trim()]);
+});
+r.sort(function(a, b){ return a[0] - b[0]; });
+return r;
+"""
+
+JS_PAGINADOR = """
+var m = (document.body.innerText || '').match(/(\\d+)\\s*-\\s*(\\d+)\\s+de\\s+(\\d+)/);
+return m ? [parseInt(m[1], 10), parseInt(m[2], 10), parseInt(m[3], 10)] : null;
+"""
+
+
+def _buscar_ruta_grid(driver, nivel=0):
+    """Como _buscar_ruta, pero busca CUALQUIER fila del grid (no solo $0)."""
+    try:
+        if driver.execute_script(JS_HAY_FILA):
+            return []
+    except WebDriverException:
+        pass
+    if nivel > 3:
+        return None
+    total = len(driver.find_elements(By.CSS_SELECTOR, "iframe,frame"))
+    for i in range(total):
+        try:
+            driver.switch_to.frame(i)
+        except WebDriverException:
+            continue
+        r = _buscar_ruta_grid(driver, nivel + 1)
+        if r is not None:
+            return [i] + r
+        try:
+            driver.switch_to.parent_frame()
+        except WebDriverException:
+            driver.switch_to.default_content()
+            return None
+    return None
+
+
+def ir_a_grid(driver, timeout=25):
+    """Entra en el frame del grid de líneas, haya en pantalla la página que haya
+    (las filas pueden llamarse $21...$41 en la última página: $0 no tiene que existir)."""
+    fin = time.time() + timeout
+    while time.time() < fin:
+        try:
+            driver.switch_to.default_content()
+            if _RUTA[0] is not None:
+                ok = True
+                for i in _RUTA[0]:
+                    try:
+                        driver.switch_to.frame(i)
+                    except WebDriverException:
+                        ok = False
+                        break
+                if ok and driver.execute_script(JS_HAY_FILA):
+                    return True
+                driver.switch_to.default_content()
+            ruta = _buscar_ruta_grid(driver)
+            if ruta is not None:
+                _RUTA[0] = ruta
+                return True
+        except WebDriverException:
+            pass
+        time.sleep(0.3)
+    raise TimeoutError("No se encontró el elemento 'REQ_LINE_WRK_INV_ITEM_ID$n' en ningún frame")
+
+
+def _leer_paginador(driver):
+    """(desde, hasta, total) del texto «1-21 de 146», o None si el grid no pagina."""
+    try:
+        r = driver.execute_script(JS_PAGINADOR)
+        return tuple(r) if r else None
+    except WebDriverException:
+        return None
+
+
+def contar_filas(driver):
+    ir_a_grid(driver, timeout=15)
+    return len(driver.execute_script(JS_FILAS_VISIBLES) or [])
+
+
+def verificar_pantalla_activa(driver, elem_id=None, timeout=5):
+    try:
+        ir_a_grid(driver, timeout=timeout)
+        return True
+    except TimeoutError:
+        return False
+
+
+def _primera_fila_libre(driver, max_filas=None):
+    """Índice ($n) de la primera fila VISIBLE con el artículo vacío (o None)."""
+    try:
+        for idx, val in (driver.execute_script(JS_FILAS_VISIBLES) or []):
+            if not val:
+                return int(idx)
+    except Exception:
+        pass
+    return None
+
+
+def _click_siguiente(driver):
+    def _buscar():
+        for e in driver.find_elements(By.XPATH,
+                "//a[contains(@title,'Siguiente') or contains(@title,'Next')]"):
+            try:
+                if e.is_displayed():
+                    driver.execute_script("arguments[0].click();", e)
+                    return True
+            except WebDriverException:
+                continue
+        return False
+    driver.switch_to.default_content()
+    ok = _en_frame_todos(driver, _buscar)
+    if ok:
+        esperar_psoft(driver, timeout=15)
+    return ok
+
+
+def _añadir_una_fila(driver, wait, ya_creadas, inf):
+    """Añade UNA fila, salta a «Último» y devuelve el índice $n de la fila vacía
+    donde escribir (la localiza mirando el DOM, nunca la calcula)."""
+    for intento in (1, 2, 3):
+        try:
+            _click_paginador(driver, "Último")
+            ir_a_grid(driver, timeout=20)
+            esperar_psoft(driver)
+            libre = _primera_fila_libre(driver)
+            if libre is not None:
+                return libre   # ya hay una vacía (p. ej. un intento anterior sí la creó)
+            antes = _leer_paginador(driver)
+            driver.execute_script("window.prompt = function(t) { return '1'; };")
+            boton_mas = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "img.PTROWADDMULTI")))
+            driver.execute_script("arguments[0].click();", boton_mas)
+            esperar_psoft(driver, timeout=30)
+            _click_paginador(driver, "Último")
+            fin = time.time() + 30
+            while time.time() < fin:
+                try:
+                    ir_a_grid(driver, timeout=10)
+                    libre = _primera_fila_libre(driver)
+                except Exception:
+                    libre = None
+                if libre is not None:
+                    despues = _leer_paginador(driver)
+                    if antes and despues and despues[2] != antes[2] + 1:
+                        print(f"      [aviso] el ERP indica {despues[2]} filas (antes {antes[2]})")
+                    return libre
+                time.sleep(1)
+            print(f"   [aviso] la fila nueva no aparece (intento {intento} de 3)")
+            recuperar(driver)
+        except Exception as e:
+            print(f"   [aviso] al añadir una fila: {resumen_error(e)}")
+            try:
+                recuperar(driver)
+            except Exception:
+                pass
+    return None
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+JS_FILAS_LABEL = """
+var r = [];
+document.querySelectorAll("input[id^='REQ_LINE_WRK_INV_ITEM_ID$']").forEach(function(e){
+  var i = parseInt(e.id.split('$').pop(), 10);
+  if (isNaN(i)) return;
+  var caja = e.closest('tr') || e.closest('div');
+  var lab = '';
+  if (caja) {
+    var tok = (caja.innerText || '').split(/\\s+/);
+    for (var k = 0; k < tok.length; k++) {
+      if (/^[1-9][0-9]{0,3}$/.test(tok[k])) { lab = tok[k]; break; }
+    }
+  }
+  r.push([i, (e.value || '').trim(), lab]);
+});
+r.sort(function(a, b){ return a[0] - b[0]; });
+return r;
+"""
+
+
+def _leer_ventana(driver):
+    """Lee las filas visibles del grid:
+    [(rel, articulo, etiqueta, cantidad, um)].
+    «rel» es el índice del DOM EN ESTA PANTALLA (cambia al paginar);
+    «etiqueta» es el número de línea que pinta el ERP a la izquierda de la
+    fila (puede venir vacío). Nunca se presupone que rel == línea."""
+    filas = driver.execute_script(JS_FILAS_LABEL) or []
+    try:
+        bruto = driver.execute_script(JS_LEER_TODAS_DOM, _UM_INFO["patron"]) or {}
+    except Exception:
+        bruto = {}
+    salida = []
+    for dato in filas:
+        rel = int(dato[0])
+        art = (dato[1] or "").strip()
+        lab = (dato[2] or "").strip()
+        q = u = None
+        for clave in (rel, str(rel)):
+            try:
+                if clave in bruto:
+                    trozo = bruto[clave]
+                    if trozo and len(trozo) >= 3:
+                        q, u = trozo[1], trozo[2]
+                    break
+            except Exception:
+                pass
+        salida.append((rel, art, lab, q, u))
+    return salida
+
+
+def _mapear_ventana(driver, datos):
+    """Ancla cada fila visible a su número de línea (1-based).
+
+    Devuelve (mapa, vacias): mapa {línea: rel} de las filas CON datos y
+    vacias [(rel, etiqueta o None)] de las filas EN BLANCO. El anclaje es por
+    etiqueta del ERP y, si falta, por contenido (artículo, y cantidad/UM si se
+    leen, para distinguir repetidos). Las filas que no se pueden anclar con
+    seguridad NO se devuelven: nunca se escribe a ciegas."""
+    total = len(datos)
+    esperados = []
+    for j in range(total):
+        f = datos.iloc[j]
+        esperados.append((str(f["articulo"]).strip(), str(f["um"]).strip().upper()))
+    mapa = {}
+    vacias = []
+    for rel, art, lab, q, u in _leer_ventana(driver):
+        if lab.isdigit():
+            n = int(lab)
+            if art:
+                mapa[n] = rel
+            else:
+                vacias.append((rel, n))
+            continue
+        if art:
+            buenos = []
+            for j in range(total):
+                n = j + 1
+                if n in mapa or esperados[j][0] != art:
+                    continue
+                if q is not None:
+                    try:
+                        if not _iguales(q, fmt_cantidad(datos.iloc[j]["cantidad"])):
+                            continue
+                    except Exception:
+                        pass
+                if u is not None and u.strip().upper() != esperados[j][1]:
+                    continue
+                buenos.append(n)
+            if len(buenos) == 1:
+                mapa[buenos[0]] = rel
+        else:
+            vacias.append((rel, None))
+    return mapa, vacias
+
+
+def _localizar_para_escribir(driver, i, datos):
+    """«rel» de la fila donde escribir la línea i (0-based), o None si no está
+    claro. Mejor devolver None (y saltar la línea) que escribir equivocado."""
+    n = i + 1
+    mapa, vacias = _mapear_ventana(driver, datos)
+    if n in mapa:
+        return mapa[n]
+    con_etiqueta = [rel for rel, lab in vacias if lab == n]
+    if len(con_etiqueta) == 1:
+        return con_etiqueta[0]
+    sin_etiqueta = sorted(rel for rel, lab in vacias if lab is None)
+    ancladas = sorted(mapa)
+    if not (sin_etiqueta and ancladas):
+        return None
+    tot = _total_según_pager(driver)
+    m = max(ancladas)
+    if tot is None or tot != len(datos) or m + len(sin_etiqueta) != tot:
+        return None
+    # Las vacías de la pantalla son justo las líneas m+1..tot. Solo se acepta
+    # si además ocupan las ÚLTIMAS posiciones de la ventana, seguidas y en
+    # orden (ventana sana); en ventanas raras, mejor no arriesgar.
+    rels = sorted(sin_etiqueta)
+    if rels != list(range(rels[0], rels[0] + len(rels))):
+        return None
+    try:
+        max_rel = max(rel for rel, _a, _l, _q, _u in _leer_ventana(driver))
+    except Exception:
+        return None
+    if rels[-1] != max_rel:
+        return None
+    pos = n - (m + 1)
+    if 0 <= pos < len(rels):
+        return rels[pos]
+    return None
+
+
+def _localizar_con_reintentos(driver, i, datos):
+    """Busca la fila de la línea i paseando por las páginas del grid
+    (la ventana rara del ERP no siempre enseña la fila que toca)."""
+    movimientos = ["Último", "Primero"] + ["Siguiente"] * 10 + ["Último", "Último"]
+    for mov in movimientos:
+        try:
+            rel = _localizar_para_escribir(driver, i, datos)
+        except Exception:
+            rel = None
+        if rel is not None:
+            return rel
+        try:
+            _click_paginador(driver, mov)
+            ir_a_grid(driver, timeout=15)
+            esperar_psoft(driver)
+        except Exception:
+            pass
+        time.sleep(0.3)
+    return None
+
+
+def _total_según_pager(driver):
+    """Total de líneas del pedido según el paginador («1-21 de 146»).
+    El total ha demostrado ser fiable aunque el rango mienta."""
+    try:
+        pag = _leer_paginador(driver)
+        if pag:
+            return int(pag[2])
+    except Exception:
+        pass
+    return None
+
+
+def _añadir_bloque(driver, wait, cuantas):
+    """Añade «cuantas» filas vacías al final del grid y devuelve cuántas se
+    añadieron (según el paginador; 0 si no se puede saber)."""
+    try:
+        _click_paginador(driver, "Último")
+        ir_a_grid(driver, timeout=20)
+        esperar_psoft(driver)
+    except Exception as e:
+        print(f"   [aviso] no se pudo ir al final del grid: {resumen_error(e)}")
+    antes = _total_según_pager(driver)
+    if antes is None:
+        print("   [aviso] el ERP no indica el total de líneas; por seguridad no añado filas a ciegas")
+        return 0
+
+    def _crecidas():
+        ahora = _total_según_pager(driver)
+        if ahora is None:
+            return None
+        return ahora - antes
+
+    if cuantas > 1:
+        try:
+            driver.execute_script("window.prompt = function(t) { return '" + str(cuantas) + "'; };")
+            boton = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "img.PTROWADDMULTI")))
+            driver.execute_script("arguments[0].click();", boton)
+            esperar_psoft(driver, timeout=30)
+            try:
+                cerrar_ventanas(driver)
+            except Exception:
+                pass
+        except Exception as e:
+            print(f"   [aviso] al añadir {cuantas} filas de golpe: {resumen_error(e)}")
+        c = _crecidas()
+        if c is not None and c >= cuantas:
+            return cuantas
+    for _ in range(cuantas * 3 + 5):
+        c = _crecidas()
+        if c is not None and c >= cuantas:
+            return cuantas
+        try:
+            driver.execute_script("window.prompt = function(t) { return '1'; };")
+            boton = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "img.PTROWADDMULTI")))
+            driver.execute_script("arguments[0].click();", boton)
+            esperar_psoft(driver, timeout=30)
+            try:
+                cerrar_ventanas(driver)
+            except Exception:
+                pass
+        except Exception as e:
+            print(f"   [aviso] al añadir una fila: {resumen_error(e)}")
+            try:
+                recuperar(driver)
+            except Exception:
+                pass
+    return _crecidas() or 0
+
+
+def _confirmar_linea(driver, i, datos):
+    """True si la línea i (0-based) quedó escrita EN SU FILA. Se lee la
+    pantalla y se busca la fila con la etiqueta de esa línea; si el ERP no
+    pinta etiquetas, se conforma con ver el artículo en alguna fila."""
+    try:
+        ir_a_grid(driver, timeout=10)
+    except Exception:
+        return True
+    n = i + 1
+    art = str(datos.iloc[i]["articulo"]).strip()
+    um = str(datos.iloc[i]["um"]).strip().upper()
+    try:
+        filas = _leer_ventana(driver)
+    except Exception:
+        return True
+    hay_etiquetas = any(lab.isdigit() for _r, _a, lab, _q, _u in filas)
+    if not hay_etiquetas:
+        return any((a or "").strip() == art for _r, a, _l, _q, _u in filas)
+    for _rel, a, lab, q, u in filas:
+        if lab.isdigit() and int(lab) == n:
+            if (a or "").strip() != art:
+                return False
+            if q is not None and not _iguales(q, fmt_cantidad(datos.iloc[i]["cantidad"])):
+                return False
+            if u is not None and u.strip().upper() != um:
+                return False
+            return True
+    return False
+
+
+def cargar_lineas(driver, wait, datos, inf):
+    """Primera tanda (~20, llena la página 1) y después en BLOQUES: se añade
+    un grupo de filas de golpe, se ancla cada fila por número de línea o
+    contenido y se rellena. Cada línea se comprueba al escribirla: si falla,
+    se anota y se SIGUE (el informe la lista para corregir a mano). Solo se
+    detiene si deja de poder anclar las filas del grid."""
+    total = len(datos)
+    TAM_PRIMERA = 20
+    TAM_BLOQUE = 20
+    print(f"5. Rellenando líneas (primera tanda de {TAM_PRIMERA}, después en bloques de {TAM_BLOQUE})...")
+    creadas = 1
+    if total > 1:
+        creadas = max(1, crear_filas(driver, wait, min(total, 1 + TAM_PRIMERA), inf, ya_creadas=1))
+        time.sleep(0.5)
+        try:
+            cerrar_ventanas(driver)
+        except Exception:
+            pass
+
+    def ejecutar(i, fila_dom):
+        try:
+            procesar_fila(driver, i, datos.iloc[i], inf, total, fila_dom=fila_dom)
+            if inf.fatal:
+                if (i + 1) not in inf.lineas:
+                    inf.linea(*_datos_linea(datos, i), "Línea en la que se detuvo el programa (revísala)")
+                _marcar_pendientes(inf, datos, i + 1, "No se llegó a procesar (error fatal anterior)")
+                return False
+        except KeyboardInterrupt:
+            raise
+        except Exception as e:
+            inf.linea(*_datos_linea(datos, i), "Error inesperado en esta línea", resumen_error(e))
+            print(f"      ¡Fila {i + 1}: error inesperado ({resumen_error(e)})! Sigo con la siguiente.")
+            if not chrome_vivo(driver):
+                inf.fatal = "Se cerró la ventana de Chrome durante la carga."
+                _marcar_pendientes(inf, datos, i + 1, "No se llegó a procesar (Chrome se cerró)")
+                return False
+            recuperar(driver)
+            return True
+        if not _confirmar_linea(driver, i, datos):
+            # línea fallida (p. ej. UM rechazada por el ERP): se ANOTA y SE SIGUE.
+            # El freno de verdad está en la localización: si la siguiente línea
+            # no se puede anclar, ahí sí se para (ver el bucle de cargar_lineas).
+            inf.linea(*_datos_linea(datos, i),
+                      "La línea NO quedó bien escrita (se SIGUE con la siguiente)",
+                      "revísala/corrígela a mano antes de pulsar Guardar")
+            return True
+        return True
+
+    rellenadas = 0
+    while rellenadas < min(creadas, total):
+        if not ejecutar(rellenadas, None):
+            return
+        rellenadas += 1
+    while rellenadas < total:
+        bloque = min(TAM_BLOQUE, total - rellenadas)
+        print(f"   --- Bloque: añadiendo {bloque} fila(s) para las líneas {rellenadas + 1} a {rellenadas + bloque} ---")
+        nuevas = _añadir_bloque(driver, wait, bloque)
+        if nuevas <= 0:
+            inf.general(f"No se pudieron añadir más filas (faltan {total - rellenadas} líneas)",
+                        "las líneas restantes se han marcado abajo; añádelas a mano")
+            _marcar_pendientes(inf, datos, rellenadas, "No se llegó a procesar (no se pudo añadir fila)")
+            break
+        for j in range(nuevas):
+            i = rellenadas + j
+            if i >= total:
+                break
+            rel = _localizar_con_reintentos(driver, i, datos)
+            if rel is None:
+                inf.general(f"No se ha podido localizar la fila vacía de la línea {i + 1}",
+                            "se detiene para no escribir en una fila equivocada; revisa el pedido a mano")
+                _marcar_pendientes(inf, datos, i, "No se localizó su fila vacía en el grid")
+                verificar_final(driver, datos, inf)
+                return
+            print(f"   Línea {i + 1} -> fila de la pantalla (${rel})")
+            if not ejecutar(i, rel):
+                return
+        rellenadas += nuevas
+    verificar_final(driver, datos, inf)
+
+
+def verificar_final(driver, datos, inf):
+    """Recorre las páginas del grid y compara cada línea con lo esperado,
+    anclando cada fila por su número de línea (etiqueta) o por contenido.
+    Las filas que no se puedan anclar cuentan como «no revisadas», nunca
+    como error."""
+    print("6. Verificación final de las líneas...")
+    leidos = {}
+    try:
+        ir_a_grid(driver, timeout=10)
+        _click_paginador(driver, "Primero")
+        firma_anterior = None
+        for _ in range(60):
+            ir_a_grid(driver, timeout=10)
+            mapa, _vacias = _mapear_ventana(driver, datos)
+            bruto = {rel: (a, q, u) for rel, a, _lab, q, u in _leer_ventana(driver)}
+            for n, rel in sorted(mapa.items()):
+                if n - 1 in leidos:
+                    continue
+                a, q, u = bruto.get(rel, ("", None, None))
+                leidos[n - 1] = (a, q, u)
+            firma = tuple(sorted(mapa.items()))
+            if firma == firma_anterior or not _click_siguiente(driver):
+                break
+            firma_anterior = firma
+        _click_paginador(driver, "Primero")
+    except Exception as e:
+        inf.general("No se pudo hacer la verificación final de las líneas", resumen_error(e))
+    no_visibles = 0
+    for i in range(len(datos)):
+        n = i + 1
+        if n in inf.lineas:
+            continue
+        if i not in leidos:
+            no_visibles += 1
+            continue
+        fila = datos.iloc[i]
+        art = str(fila["articulo"]).strip()
+        um = str(fila["um"]).strip().upper()
+        prod = str(fila["producto"]).strip() if ("producto" in datos.columns and pd.notna(fila["producto"])) else ""
+        try:
+            qty = fmt_cantidad(fila["cantidad"])
+        except Exception:
+            qty = str(fila["cantidad"])
+        a, q, u = leidos[i]
+        a_clean = (a or "").strip()
+        if a_clean != art:
+            if a_clean and art.startswith(a_clean) and len(a_clean) < len(art) * 0.7:
+                inf.linea(n, art, qty, um, prod, "Verificación final: artículo TRUNCADO en pantalla",
+                          f"aparece '{a_clean}' (primeros {len(a_clean)} de {len(art)} caracteres)")
+            else:
+                inf.linea(n, art, qty, um, prod, "Verificación final: artículo distinto en pantalla",
+                          f"aparece '{a_clean}'")
+        if q is not None and not _iguales(q, qty):
+            inf.linea(n, art, qty, um, prod, "Verificación final: cantidad distinta en pantalla",
+                      f"aparece '{q.strip()}', debería ser {qty}")
+        if u is not None and u.strip().upper() != um:
+            inf.linea(n, art, qty, um, prod, "Verificación final: UM distinta o vacía en pantalla",
+                      f"aparece '{u.strip()}', debería ser {um}")
+    if no_visibles:
+        inf.general(f"{no_visibles} líneas no se han podido revisar al final (no se han podido anclar en el grid)",
+                    "cada línea se validó en su momento al escribirla")
+
+
 def crear_driver():
     """Chrome se deja ABIERTO al terminar el script (detach) para poder revisar y guardar el pedido."""
     opts = Options()
@@ -1850,71 +2553,33 @@ def main():
         inf.fatal = f"Error inesperado: {resumen_error(e)}"
         print(f"\n¡{inf.fatal}")
         
-    vigilar_activo = (driver is not None and not inf.fatal)
-    estado_vigilante = {"id_solicitud": None, "fin": False} if vigilar_activo else None
-    hilo_ventana = None
-
     if inf.hay_errores:
         guardar_informe(inf, driver)
         print("\n" + inf.texto())
-
-        if vigilar_activo:
-            txt_error = (
-                f"Se han cargado {len(datos) - len(inf.lineas)} líneas. Hay {len(inf.lineas)} incidencias.\n\n"
-                "👉 IMPORTANTE: Ve a Chrome, revisa las líneas indicadas abajo, corrígelas a mano y pulsa GUARDAR en el ERP.\n"
-                "NO cierres la consola negra: el robot ya está vigilando en segundo plano y anotará el ID de Solicitud "
-                "automáticamente en CineStock en cuanto pulses Guardar.\n\n"
-                + ("-" * 75) + "\n" + inf.texto()
-            )
-            hilo_ventana = threading.Thread(
-                target=mostrar_ventana,
-                args=("Pedido ERP - Revisión necesaria", txt_error, True, estado_vigilante),
-                daemon=True,
-            )
-            hilo_ventana.start()
-        else:
-            mostrar_ventana("Pedido ERP - Error", inf.texto(), error=True)
+        
+        txt_error = (f"Se han cargado {len(datos) - len(inf.lineas)} líneas. Hay {len(inf.lineas)} incidencias.\n\n"
+                     "👉 IMPORTANTE: Ve a Chrome, revisa las líneas marcadas en el informe, corrígelas a mano y pulsa GUARDAR en el ERP.\n\n"
+                     "NO CIERRES ESTA VENTANA NI LA CONSOLA NEGRA. El robot se quedará esperando en segundo plano para leer el ID de Solicitud automáticamente en cuanto pulses Guardar.")
+        mostrar_ventana("Pedido ERP - Revisión necesaria", txt_error, error=True)
     else:
-        txt_ok = (
-            f"¡Las {len(datos)} líneas se han cargado correctamente!\n\n"
-            "👉 PULSA 'GUARDAR' EN EL ERP AHORA.\n\n"
-            "NO cierres la consola negra: el robot ya está vigilando en segundo plano para leer el "
-            "ID de Solicitud automáticamente en cuanto pulses Guardar, y lo anotará en CineStock."
-        )
+        txt_ok = (f"¡Las {len(datos)} líneas se han cargado correctamente!\n\n"
+                  "👉 PULSA 'GUARDAR' EN EL ERP AHORA.\n\n"
+                  "NO CIERRES ESTA VENTANA NI LA CONSOLA NEGRA. El robot se quedará esperando en segundo plano para leer el ID de Solicitud automáticamente en cuanto pulses Guardar, y lo anotará en tu Registro de Pedidos.")
         print("\n" + txt_ok)
-        if vigilar_activo:
-            hilo_ventana = threading.Thread(
-                target=mostrar_ventana,
-                args=("Pedido ERP - Carga finalizada", txt_ok, False, estado_vigilante),
-                daemon=True,
-            )
-            hilo_ventana.start()
-        else:
-            mostrar_ventana("Pedido ERP - Carga finalizada", txt_ok, error=False)
-
-    # --- VIGILANTE DEL ID DE SOLICITUD (ARRANCA AL INSTANTE SIN BLOQUEARSE) ---
-    if vigilar_activo:
+        mostrar_ventana("Pedido ERP - Carga finalizada", txt_ok, error=False)
+        
+    # --- VIGILANTE EN SU SITIO CORRECTO ---
+    if args.auto and driver is not None and not inf.fatal:
         try:
-            from robot_id_pedido import vigilar_id_solicitud
-            print("\n" + "=" * 60)
+            from robot_id_pedido import vigilar_id_pedido
+            print("\n" + "="*60)
             print(" 🕵️‍♂️ ESPERANDO A QUE PULSES GUARDAR EN EL ERP...")
-            print(" (Deja esta consola abierta. El robot leerá el ID Solicitud solo)")
-            print("=" * 60 + "\n")
-
-            def _al_detectar(id_sol):
-                if estado_vigilante is not None:
-                    estado_vigilante["id_solicitud"] = id_sol
-
-            vigilar_id_solicitud(driver, ruta, al_detectar=_al_detectar)
+            print(" (Deja esta ventana abierta. El robot leerá el ID solo)")
+            print("="*60 + "\n")
+            # 'ruta' aquí SÍ existe (la del cargar_datos)
+            vigilar_id_pedido(driver, ruta)
         except Exception as e:
-            print(f"[aviso] No se pudo vigilar el ID de solicitud: {e}")
-        finally:
-            if estado_vigilante is not None:
-                estado_vigilante["fin"] = True
-            if hilo_ventana is not None and hilo_ventana.is_alive():
-                # Si no hubo incidencias se cierra sola a los ~4s; si hubo incidencias
-                # damos margen o esperamos a que el usuario cierre el informe.
-                hilo_ventana.join(timeout=6.0 if not inf.hay_errores else None)
+            print(f"[aviso] No se pudo vigilar el ID de pedido: {e}")
     # ---------------------------------------------------
 
     # CORREGIDO: antes se hacía driver.quit() aquí, cerrando Chrome y perdiendo el pedido sin guardar.
