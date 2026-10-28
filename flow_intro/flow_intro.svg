@@ -7,8 +7,21 @@
   PARA CAMBIAR LOS COLORES: edita solo el bloque <style> de abajo
   (y los dos degradados de <defs>, que llevan los mismos colores).
   PARA CAMBIAR EL TEXTO: busca "TU ALMACEN, EN MOVIMIENTO".
+
+  GATO REAL DE LA APP: pon "gato.png" junto a este archivo y sustituye
+  TODO el bloque "EL GATO" (de <g id="gato"> a su </g>) por esto:
+
+      <g id="gato" style="opacity:1">
+        <image href="gato.png" xlink:href="gato.png"
+               x="58" y="48" width="240" height="325"
+               preserveAspectRatio="xMidYMid meet"/>
+      </g>
+
+  Si el archivo de res/drawable es un .xml, este visor no puede leerlo:
+  hay que exportarlo antes a PNG o SVG.
 -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 460"
+<svg xmlns="http://www.w3.org/2000/svg"
+     xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 900 460"
      width="900" height="460" role="img" aria-label="Intro FLOW con un gato">
   <title>FLOW · Tu almacén, en movimiento</title>
 

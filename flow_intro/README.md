@@ -34,6 +34,7 @@ grabaciones de la misma animación.
 | `flow_intro.png` | Fotograma final, por si hace falta una miniatura. |
 | `generar_muestras.py` | Programa que vuelve a crear el GIF, MP4 y PNG. Solo hace falta si cambias el dibujo. |
 | `index.html` | Atajo para que la vista previa abra directamente la animación. |
+| `gato.png` *(opcional)* | Si pones aquí el gato real de Flow, la intro lo usa en vez del dibujado. Mira el apartado 4. |
 
 ---
 
@@ -66,6 +67,8 @@ class SplashActivity : AppCompatActivity() {
         val web = WebView(this)
         setContentView(web)
         web.settings.javaScriptEnabled = true          // imprescindible
+        web.settings.allowFileAccess = true
+        web.settings.allowFileAccessFromFileURLs = true // para cargar gato.png
         web.settings.domStorageEnabled = false
         web.setBackgroundColor(Color.parseColor("#0b1226"))
 
@@ -95,6 +98,8 @@ public class SplashActivity extends AppCompatActivity {
         WebView web = new WebView(this);
         setContentView(web);
         web.getSettings().setJavaScriptEnabled(true);   // imprescindible
+        web.getSettings().setAllowFileAccess(true);
+        web.getSettings().setAllowFileAccessFromFileURLs(true); // gato.png
         web.setBackgroundColor(Color.parseColor("#0b1226"));
 
         web.addJavascriptInterface(new Object() {
@@ -166,7 +171,58 @@ admite directamente; en ese caso usa la Opción A).
 
 ---
 
-## 4. Cambiar los colores, el texto o la velocidad
+## 4. Usar el gato REAL de Flow (el que está en `res/drawable`)
+
+La intro trae un gato dibujado por si acaso, pero **puede usar el gato de la
+app sin cambiar el dibujo**: si en la misma carpeta que `flow_intro.html` hay
+un archivo llamado `gato.png`, la intro lo detecta sola y lo pone en vez del
+gato dibujado. Si no está, sigue con el dibujo. Así el HTML funciona igual con
+doble clic en el PC.
+
+**Paso 1.** Mira el nombre exacto del archivo en:
+
+```
+app/src/main/res/drawable/
+```
+
+Fíjate sobre todo en la **extensión**:
+
+| Si el archivo es… | Qué hacer |
+|---|---|
+| `.png`, `.jpg`, `.webp`, `.gif` o `.svg` | Cópialo a `app/src/main/assets/`. Si no se llama exactamente `gato.png`, cambia en el HTML la línea `const GATO_REAL = "gato.png";` por el nombre real (por ejemplo `"gato.webp"`). |
+| `.xml` (vector drawable de Android) | Un WebView **no sabe leer** ese `.xml`. Mándame el archivo y te lo convierto a PNG/SVG, o pídele a quien programe la app que lo exporte como imagen. |
+| Hay varios `.xml` | El dibujo suele estar en el que tiene `android:pathData`. Mándamelo y lo miro. |
+
+**Paso 2.** En el `SplashActivity` de la Opción A, añade estas dos líneas
+debajo de `javaScriptEnabled = true;`:
+
+```kotlin
+web.settings.allowFileAccess = true
+web.settings.allowFileAccessFromFileURLs = true
+```
+
+En Java: `web.getSettings().setAllowFileAccess(true);` y
+`web.getSettings().setAllowFileAccessFromFileURLs(true);`.
+
+> Esas dos líneas son seguras aquí porque la página es **nuestra y local**;
+> no las pongas en páginas que carguen contenido de internet.
+
+**Paso 3.** Ya está. Al abrir la intro, si `gato.png` existe se ve el gato de
+Flow; si no, se ve el gato dibujado. **No hay que tocar el `AndroidManifest`**.
+
+También se puede cambiar desde la app con `FlowIntro.setGato('gato.png')`, o
+dejar el gato dibujado a propósito poniendo `const GATO_REAL = "";` en el
+bloque `CONFIG` del HTML.
+
+> **Ojo con el MP4 y el GIF:** los que vienen ya hechos llevan el gato
+> dibujado «grabado». La **Opción A (HTML)** no tiene ese problema: detecta el
+> gato real al vuelo. Pero si eliges la **Opción B (vídeo)**, hay que volver a
+> generar el MP4 con el gato real dentro (apartado 6). El generador también
+> usa `gato.png` automáticamente si lo pones en esta carpeta.
+
+---
+
+## 5. Cambiar los colores, el texto o la velocidad
 
 Abre `flow_intro.html` con el **Bloc de notas** (clic derecho → Abrir con →
 Bloc de notas) y busca el apartado `CONFIG` (hacia la mitad del archivo).
@@ -199,7 +255,7 @@ principio (y sus dos degradados en `<defs>`).
 
 ---
 
-## 5. Volver a generar el GIF, el MP4 y el PNG
+## 6. Volver a generar el GIF, el MP4 y el PNG
 
 Solo hace falta si has cambiado el dibujo, los colores o el texto del HTML y
 quieres que las muestras en vídeo también lo reflejen. Se hace en el **PC**,
@@ -213,24 +269,27 @@ python flow_intro\generar_muestras.py
 Los tres archivos se escriben otra vez dentro de `flow_intro/`. Tarda unos
 segundos. Si no tienes WinPython a mano, con un Python normal vale igual.
 
+**Si hay un `gato.png` en la carpeta**, el GIF, el MP4 y el PNG salen con el
+gato real de Flow. Si no lo hay, salen con el gato dibujado. Así puedes dejar
+las muestras a juego con la app.
+
 ---
 
-## 6. Detalles técnicos
+## 7. Detalles técnicos
 
 - **Autocontenido:** ni CDN, ni fuentes externas, ni imágenes externas. Todo
   está dibujado dentro del archivo (SVG + CSS + JavaScript). Funciona sin red.
-- **Tamaño:** HTML 17 KB, SVG 9 KB, MP4 268 KB, GIF 1,2 MB.
+- **Tamaño:** HTML 19 KB, SVG 10 KB, MP4 268 KB, GIF 1,2 MB.
 - **Móvil:** se adapta al ancho de pantalla con `viewport` y `viewBox`.
 - **Accesibilidad:** si el móvil tiene activado «reducir movimiento», la intro
   se muestra quieta y avisa a la app igualmente (no se queda colgada).
 - **Compatible** con Chrome, Edge, Firefox, Safari y WebView de Android.
-- **El gato es un dibujo propio en SVG**, hecho para esta intro. Si Flow ya
-  tiene su propio gato/logo (un PNG o SVG), pásamelo y lo sustituyo por el
-  real manteniendo la misma animación.
+- **El gato dibujado es provisional**: hecho a mano en SVG. Para usar el gato
+  real de `res/drawable`, mira el apartado 4.
 
 ---
 
-## 7. Resumen para decidir
+## 8. Resumen para decidir
 
 | Si quieres… | Usa |
 |---|---|

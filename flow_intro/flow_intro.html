@@ -20,6 +20,7 @@
          FlowIntro.replay()               -> repite la animación
          FlowIntro.setPaleta('palomitas') -> cambia los colores
          FlowIntro.setTexto('TU TEXTO')   -> cambia el subtítulo
+         FlowIntro.setGato('gato.png')   -> usa el gato REAL de la app
          FlowIntro.onFin = function(){ ... }  -> al terminar la intro
        Y, si el WebView registra el objeto "AndroidFlow", se llama solo
        a  AndroidFlow.introTerminada()  al acabar (mira el README).
@@ -155,6 +156,12 @@
 
     <!-- ============ EL GATO ============ -->
     <g id="gato">
+      <!-- GATO REAL DE LA APP: si hay un "gato.png" en esta misma carpeta,
+           se usa esa imagen y el gato dibujado se oculta el solo. Si no lo
+           hay, se sigue viendo el gato dibujado (para el PC / demo). -->
+      <image id="gato_foto" x="58" y="48" width="240" height="325"
+             preserveAspectRatio="xMidYMid meet" opacity="0"/>
+      <g id="gato_dibujo">
       <!-- cola -->
       <path id="cola" d="M 205 290 C 275 285, 288 205, 250 178"
             fill="none" stroke="url(#gatoGrad)" stroke-width="26"
@@ -201,6 +208,7 @@
         <circle cx="246" cy="291" r="8" fill="#fff3d6"/>
         <circle cx="266" cy="290" r="8" fill="#fff3d6"/>
       </g>
+      </g><!-- /gato_dibujo -->
     </g>
 
     <!-- ============ LETRAS FLOW (trazo a trazo) ============ -->
@@ -259,6 +267,11 @@ const VELOCIDAD = 1;             // 1 = normal; 2 = el doble de rápido
 const REPETIR = false;           // true = la intro se repite en bucle
 const TEXTO_SUBTITULO = "TU ALMACÉN, EN MOVIMIENTO";
 
+// GATO REAL: nombre del archivo del gato de la app, en esta MISMA carpeta.
+// Si no existe, se dibuja el gato que trae la intro. Pon "" para forzar
+// el gato dibujado. Admite .png, .webp, .jpg, .gif o .svg.
+const GATO_REAL = "gato.png";
+
 const PALETAS = {
   cine:      {fondo1:"#0b1226",fondo2:"#172a4d",tinta:"#ffd79a",brillo:"#fff3d6",
               gato:"#f2a65a",gato_oscuro:"#d9853f",rosa:"#ff9db0",texto:"#cfe0ff"},
@@ -274,10 +287,12 @@ const svg = $("#escena"), gato = $("#gato"), punta = $("#punta");
 const trazos = [...document.querySelectorAll("#letras .trazo")];
 const barra = $("#barra"), subrayado = $("#subrayado");
 const txtSub = $("#txt_sub"), txtFirma = $("#txt_firma"), panel = $("#panel");
+const gatoDibujo = $("#gato_dibujo"), gatoFoto = $("#gato_foto");
+const XLINK = "http://www.w3.org/1999/xlink";
 
 const api = {
   onFin: null,
-  replay, setPaleta, setTexto,
+  replay, setPaleta, setTexto, setGato,
   setVelocidad(v){ CONFIG_VEL = Number(v) || 1; }
 };
 window.FlowIntro = api;
@@ -293,6 +308,32 @@ function setPaleta(nombre){
   return api;
 }
 function setTexto(t){ txtSub.textContent = t; return api; }
+
+/* Gato real de la app.
+   Primero se comprueba que el archivo existe con un <img> invisible.
+   Solo si carga se le pone la ruta al <image> del SVG; así nunca se ve
+   el icono de "imagen rota" cuando se abre la intro en el PC. */
+function setGato(ruta){
+  if(!ruta){
+    gatoFoto.removeAttribute("href");
+    gatoFoto.removeAttributeNS(XLINK, "href");
+    gatoFoto.style.opacity = 0; gatoDibujo.style.opacity = 1;
+    return api;
+  }
+  const prueba = new Image();
+  prueba.onload = function(){
+    gatoFoto.setAttribute("href", ruta);
+    gatoFoto.setAttributeNS(XLINK, "xlink:href", ruta);
+    gatoFoto.style.opacity = 1;
+    gatoDibujo.style.opacity = 0;
+  };
+  prueba.onerror = function(){
+    gatoFoto.style.opacity = 0; gatoDibujo.style.opacity = 1;
+  };
+  prueba.src = ruta;
+  return api;
+}
+if(GATO_REAL) setGato(GATO_REAL);
 
 /* Palomitas de fondo */
 (function sembrar(){

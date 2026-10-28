@@ -14,6 +14,9 @@ Uso (con WinPython o Python normal):
     python flow_intro/generar_muestras.py
 
 El dibujo se hace con Pillow, sin internet y sin fuentes externas.
+
+GATO REAL: si pones un "gato.png" en esta misma carpeta (el de res/drawable
+de la app Flow), las muestras salen con ESE gato en vez del dibujado.
 """
 
 import math
@@ -195,8 +198,45 @@ def dibujar_palomitas(img, t):
         d.ellipse([cx-rr, cyy-rr, cx+rr, cyy+rr], fill=C["brillo"] + (a,))
 
 
+_gato_real = None
+
+def cargar_gato_real():
+    """Devuelve el gato.png de la carpeta (ya ajustado de tamano), o False."""
+    global _gato_real
+    if _gato_real is None:
+        ruta = os.path.join(AQUI, "gato.png")
+        try:
+            im = Image.open(ruta).convert("RGBA")
+            x0, y0 = P(58, 48)
+            x1, y1 = P(298, 373)
+            im.thumbnail((x1 - x0, y1 - y0), Image.LANCZOS)
+            _gato_real = im
+        except Exception:
+            _gato_real = False
+    return _gato_real
+
+
+def terminar_capa(capa, alpha, dy):
+    if alpha < 1:
+        a = capa.getchannel("A").point(lambda v: int(v * alpha))
+        capa.putalpha(a)
+    if dy:
+        capa = ImageChops.offset(capa, 0, int(dy * K))
+    return capa
+
+
 def capa_gato(t, alpha, dy):
     capa = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+
+    # Si la app aporta su gato real, se usa ese y no se dibuja nada.
+    real = cargar_gato_real()
+    if real:
+        x0, y0 = P(58, 48)
+        x1, y1 = P(298, 373)
+        px = x0 + (x1 - x0 - real.width) // 2
+        py = y0 + (y1 - y0 - real.height) // 2
+        capa.alpha_composite(real, (px, py))
+        return terminar_capa(capa, alpha, dy)
 
     # Mascara de las partes con degradado (cuerpo, cabeza, orejas, cola, patas)
     mask = Image.new("L", (W, H), 0)
@@ -249,12 +289,7 @@ def capa_gato(t, alpha, dy):
     for cx, cy, r in ((238,300,10),(255,297,12),(272,301,10),(246,291,8),(266,290,8)):
         d.ellipse([*P(cx-r,cy-r), *P(cx+r,cy+r)], fill=C["brillo"] + (255,))
 
-    if alpha < 1:
-        a = capa.getchannel("A").point(lambda v: int(v * alpha))
-        capa.putalpha(a)
-    if dy:
-        capa = ImageChops.offset(capa, 0, int(dy * K))
-    return capa
+    return terminar_capa(capa, alpha, dy)
 
 
 # Letras: coordenadas locales del grupo <g transform="translate(310,150) scale(1.18)">
