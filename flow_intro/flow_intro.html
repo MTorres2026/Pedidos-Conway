@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>FLOW · Intro</title>
+<!--
+  ============================================================
+  INTRO ANIMADA PARA LA APP "FLOW" (almacén / CineStock)
+  ============================================================
+  Archivo AUTOCONTENIDO: sin librerías, sin internet, sin fuentes
+  externas. Funciona con doble clic en el PC y en el móvil.
+
+  CÓMO PONERLA EN LA APP:
+    1) Copia este archivo a los assets de la app y ábrelo en un WebView
+       como pantalla de carga (splash).
+    2) Abrelo con  flow_intro.html?app=1  (o flow_intro.html#app) para
+       ocultar el panel de ajustes. Tambien sirve MODO_APP = true en CONFIG.
+    3) Desde la app puedes llamar a:
+         FlowIntro.replay()               -> repite la animación
+         FlowIntro.setPaleta('palomitas') -> cambia los colores
+         FlowIntro.setTexto('TU TEXTO')   -> cambia el subtítulo
+         FlowIntro.onFin = function(){ ... }  -> al terminar la intro
+       Y, si el WebView registra el objeto "AndroidFlow", se llama solo
+       a  AndroidFlow.introTerminada()  al acabar (mira el README).
+    4) Para generar un MP4/GIF de muestra, mira el README de esta carpeta.
+
+  Todo lo que quieras cambiar está en el bloque CONFIG.
+  ============================================================
+-->
+<style>
+  :root{
+    --fondo1:#0b1226;
+    --fondo2:#172a4d;
+    --tinta:#ffd79a;
+    --brillo:#fff3d6;
+   --gato:#f2a65a;
+    --gato_oscuro:#d9853f;
+    --rosa:#ff9db0;
+    --texto:#cfe0ff;
+    --sombra:rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{
+    background:var(--fondo1);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    display:flex; align-items:center; justify-content:center;
+    overflow:hidden; color:var(--texto);
+    -webkit-tap-highlight-color:transparent;
+  }
+  .pantalla{
+    position:relative; width:100%; height:100%;
+    max-width:900px; max-height:520px;
+    background:radial-gradient(120% 120% at 30% 15%, var(--fondo2) 0%, var(--fondo1) 70%);
+    border-radius:22px; overflow:hidden;
+    box-shadow:0 24px 70px var(--sombra);
+  }
+  @media (max-width:920px){ .pantalla{border-radius:0;max-height:none} }
+
+  /* Estrellas / palomitas flotando */
+  .palomita{
+    position:absolute; width:9px; height:9px; border-radius:50% 50% 45% 45%;
+    background:var(--brillo); opacity:.0; filter:blur(.2px);
+    animation:flotar linear infinite;
+  }
+  @keyframes flotar{
+    0%{transform:translateY(40px) rotate(0deg) scale(.6);opacity:0}
+    15%{opacity:.55}
+    85%{opacity:.35}
+    100%{transform:translateY(-460px) rotate(220deg) scale(1.05);opacity:0}
+  }
+  .haz{
+    position:absolute; inset:-40% -10% auto -10%; height:180%;
+    background:conic-gradient(from 200deg at 28% 18%, transparent 0deg,
+              rgba(255,215,154,.09) 22deg, transparent 48deg);
+    animation:barrer 9s ease-in-out infinite alternate;
+    pointer-events:none;
+  }
+  @keyframes barrer{ from{transform:rotate(-8deg)} to{transform:rotate(8deg)} }
+
+  svg#escena{position:relative;width:100%;height:100%;display:block}
+
+  /* Letras: se "escriben" trazo a trazo */
+  .trazo{
+    fill:none; stroke:var(--tinta); stroke-width:11;
+    stroke-linecap:round; stroke-linejoin:round;
+    filter:url(#glow);
+  }
+  .trazo_fino{ stroke-width:7 }
+  #punta{ fill:var(--brillo); filter:url(#glowFuerte); opacity:0 }
+  #gato{ opacity:0; transform-origin:150px 250px; }
+  #cola{ transform-origin:205px 285px; animation:menear 2.6s ease-in-out infinite }
+  @keyframes menear{ 0%,100%{transform:rotate(-6deg)} 50%{transform:rotate(9deg)} }
+  .parpado{ animation:parpadear 4.2s infinite; transform-origin:center;
+            transform-box:fill-box; }
+  @keyframes parpadear{
+    0%,92%,100%{transform:scaleY(0)}
+    95%{transform:scaleY(1)} 97%{transform:scaleY(0)}
+  }
+
+  .subtitulo,.firma{
+    fill:var(--texto); font-family:inherit; text-anchor:middle;
+    letter-spacing:7px; opacity:0;
+  }
+  .subtitulo{ font-size:19px; }
+  .firma{ font-size:12px; letter-spacing:4px; opacity:0 }
+
+  #barra_fondo{ stroke:rgba(255,255,255,.12); stroke-width:4; stroke-linecap:round }
+  #barra{ stroke:var(--tinta); stroke-width:4; stroke-linecap:round;
+          filter:url(#glow); stroke-dasharray:180; stroke-dashoffset:180; }
+
+  /* Panel de ajustes (se oculta en MODO_APP) */
+  #panel{
+    position:absolute; right:14px; bottom:14px; z-index:5;
+    display:flex; gap:8px; align-items:center; flex-wrap:wrap;
+    justify-content:flex-end; max-width:calc(100% - 28px);
+    padding:9px 11px; border-radius:14px;
+    background:rgba(8,14,30,.62); backdrop-filter:blur(8px);
+    border:1px solid rgba(255,255,255,.12);
+    font-size:12px; transition:opacity .4s;
+  }
+  #panel button{
+    border:1px solid rgba(255,255,255,.22); background:rgba(255,255,255,.07);
+    color:#fff; padding:6px 10px; border-radius:9px; cursor:pointer;
+    font-size:12px;
+  }
+  #panel button:hover{ background:rgba(255,255,255,.18) }
+  #panel button.activo{ background:var(--tinta); color:#1a1206; font-weight:700 }
+  .oculto{ opacity:0 !important; pointer-events:none }
+</style>
+</head>
+<body>
+<div class="pantalla" id="pantalla">
+  <div class="haz"></div>
+  <div id="palomitas"></div>
+
+  <svg id="escena" viewBox="0 0 900 460" preserveAspectRatio="xMidYMid meet"
+       role="img" aria-label="Intro animada de FLOW con un gato">
+    <defs>
+      <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+        <feGaussianBlur stdDeviation="4" result="b"/>
+        <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+      <filter id="glowFuerte" x="-100%" y="-100%" width="300%" height="300%">
+        <feGaussianBlur stdDeviation="9" result="b"/>
+        <feMerge><feMergeNode in="b"/><feMergeNode in="b"/>
+                 <feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+      <linearGradient id="gatoGrad" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="var(--gato)"/>
+        <stop offset="1" stop-color="var(--gato_oscuro)"/>
+      </linearGradient>
+    </defs>
+
+    <!-- ============ EL GATO ============ -->
+    <g id="gato">
+      <!-- cola -->
+      <path id="cola" d="M 205 290 C 275 285, 288 205, 250 178"
+            fill="none" stroke="url(#gatoGrad)" stroke-width="26"
+            stroke-linecap="round"/>
+      <!-- cuerpo -->
+      <ellipse cx="150" cy="292" rx="76" ry="72" fill="url(#gatoGrad)"/>
+      <!-- pata delantera -->
+      <ellipse cx="120" cy="352" rx="30" ry="15" fill="var(--gato)"/>
+      <ellipse cx="178" cy="352" rx="30" ry="15" fill="var(--gato)"/>
+      <!-- orejas -->
+      <path d="M 88 128 L 80 58 L 137 104 Z" fill="var(--gato)"/>
+      <path d="M 212 128 L 222 58 L 164 104 Z" fill="var(--gato)"/>
+      <path d="M 94 116 L 89 76 L 123 106 Z" fill="var(--rosa)" opacity=".85"/>
+      <path d="M 206 116 L 212 76 L 177 106 Z" fill="var(--rosa)" opacity=".85"/>
+      <!-- cabeza -->
+      <circle cx="150" cy="158" r="72" fill="url(#gatoGrad)"/>
+      <!-- ojos -->
+      <ellipse cx="124" cy="150" rx="17" ry="20" fill="#fff8ec"/>
+      <ellipse cx="176" cy="150" rx="17" ry="20" fill="#fff8ec"/>
+      <circle cx="127" cy="152" r="8" fill="#23304d"/>
+      <circle cx="179" cy="152" r="8" fill="#23304d"/>
+      <circle cx="130" cy="149" r="2.6" fill="#fff"/>
+      <circle cx="182" cy="149" r="2.6" fill="#fff"/>
+      <rect class="parpado" x="106" y="128" width="36" height="44" rx="16"
+            fill="var(--gato)"/>
+      <rect class="parpado" x="158" y="128" width="36" height="44" rx="16"
+            fill="var(--gato)"/>
+      <!-- nariz y boca -->
+      <path d="M 143 176 L 157 176 L 150 184 Z" fill="var(--rosa)"/>
+      <path d="M 150 184 Q 138 196 128 188 M 150 184 Q 162 196 172 188"
+            fill="none" stroke="#7a4a2c" stroke-width="3" stroke-linecap="round"/>
+      <!-- bigotes -->
+      <g stroke="#fff3d6" stroke-width="2.6" stroke-linecap="round" opacity=".9">
+        <path d="M 112 180 L 68 174"/><path d="M 112 188 L 70 192"/>
+        <path d="M 188 180 L 232 174"/><path d="M 188 188 L 230 192"/>
+      </g>
+      <!-- cajita de palomitas del almacén -->
+      <g id="caja">
+        <rect x="222" y="300" width="66" height="62" rx="6" fill="#e9604f"/>
+        <rect x="222" y="300" width="66" height="14" rx="4" fill="#ffd79a"/>
+        <circle cx="238" cy="300" r="10" fill="#fff3d6"/>
+        <circle cx="255" cy="297" r="12" fill="#fff3d6"/>
+        <circle cx="272" cy="301" r="10" fill="#fff3d6"/>
+        <circle cx="246" cy="291" r="8" fill="#fff3d6"/>
+        <circle cx="266" cy="290" r="8" fill="#fff3d6"/>
+      </g>
+    </g>
+
+    <!-- ============ LETRAS FLOW (trazo a trazo) ============ -->
+    <g id="letras" transform="translate(310,150) scale(1.18)">
+      <!-- F -->
+      <g transform="translate(0,0)">
+        <path class="trazo" d="M 12 150 L 12 8 L 96 8"/>
+        <path class="trazo trazo_fino" d="M 12 78 L 74 78"/>
+      </g>
+      <!-- L -->
+      <g transform="translate(112,0)">
+        <path class="trazo" d="M 12 8 L 12 150 L 92 150"/>
+      </g>
+      <!-- O -->
+      <g transform="translate(214,0)">
+        <path class="trazo" d="M 96 79 C 96 50, 76 26, 52 26 C 28 26, 8 50, 8 79 C 8 108, 28 132, 52 132 C 76 132, 96 108, 96 79 Z"/>
+      </g>
+      <!-- W -->
+      <g transform="translate(330,0)">
+        <path class="trazo" d="M 8 8 L 36 150 L 66 52 L 96 150 L 124 8"/>
+      </g>
+    </g>
+
+    <!-- Punto de luz que "escribe" -->
+    <circle id="punta" r="9" cx="0" cy="0"/>
+
+    <!-- Subrayado -->
+    <path id="subrayado" class="trazo trazo_fino"
+          d="M 330 352 Q 580 364 835 352" opacity="0"/>
+
+    <!-- Textos -->
+    <text class="subtitulo" id="txt_sub" x="450" y="382">TU ALMACÉN, EN MOVIMIENTO</text>
+    <text class="firma" id="txt_firma" x="450" y="412">CINESTOCK  ·  FLOW</text>
+
+    <!-- Barra de carga -->
+    <line id="barra_fondo" x1="360" y1="432" x2="540" y2="432"/>
+    <line id="barra" x1="360" y1="432" x2="540" y2="432"/>
+  </svg>
+
+  <div id="panel">
+    <button data-pal="cine" class="activo">🌙 Cine</button>
+    <button data-pal="palomitas">🍿 Palomitas</button>
+    <button data-pal="neon">💙 Neón</button>
+    <button id="btn_repetir">↻ Repetir</button>
+    <button id="btn_app">👁 Modo app</button>
+  </div>
+</div>
+
+<script>
+/* ======================= CONFIG ======================= */
+// ?app=1 al final de la URL = la intro se muestra SIN botones (modo splash).
+// Tambien puedes poner MODO_APP = true a mano.
+const MODO_APP = new URLSearchParams(location.search).has("app")
+                 || location.hash === "#app";
+const VELOCIDAD = 1;             // 1 = normal; 2 = el doble de rápido
+const REPETIR = false;           // true = la intro se repite en bucle
+const TEXTO_SUBTITULO = "TU ALMACÉN, EN MOVIMIENTO";
+
+const PALETAS = {
+  cine:      {fondo1:"#0b1226",fondo2:"#172a4d",tinta:"#ffd79a",brillo:"#fff3d6",
+              gato:"#f2a65a",gato_oscuro:"#d9853f",rosa:"#ff9db0",texto:"#cfe0ff"},
+  palomitas: {fondo1:"#2a1206",fondo2:"#5c2a10",tinta:"#ffe27a",brillo:"#fff8dc",
+              gato:"#ffb15c",gato_oscuro:"#e07b32",rosa:"#ff7a90",texto:"#ffdcc0"},
+  neon:      {fondo1:"#04121f",fondo2:"#0b3b52",tinta:"#7df9ff",brillo:"#e6ffff",
+              gato:"#8fb8d6",gato_oscuro:"#4d7fa6",rosa:"#ff9ecb",texto:"#bfefff"}
+};
+/* ===================================================== */
+
+const $ = s => document.querySelector(s);
+const svg = $("#escena"), gato = $("#gato"), punta = $("#punta");
+const trazos = [...document.querySelectorAll("#letras .trazo")];
+const barra = $("#barra"), subrayado = $("#subrayado");
+const txtSub = $("#txt_sub"), txtFirma = $("#txt_firma"), panel = $("#panel");
+
+const api = {
+  onFin: null,
+  replay, setPaleta, setTexto,
+  setVelocidad(v){ CONFIG_VEL = Number(v) || 1; }
+};
+window.FlowIntro = api;
+let CONFIG_VEL = VELOCIDAD;
+let corriendo = false, token = 0;
+
+/* Paletas */
+function setPaleta(nombre){
+  const p = PALETAS[nombre] || PALETAS.cine, r = document.documentElement.style;
+  for (const k in p) r.setProperty("--"+k, p[k]);
+  document.querySelectorAll("#panel [data-pal]").forEach(b=>
+    b.classList.toggle("activo", b.dataset.pal===nombre));
+  return api;
+}
+function setTexto(t){ txtSub.textContent = t; return api; }
+
+/* Palomitas de fondo */
+(function sembrar(){
+  const c = $("#palomitas");
+  for(let i=0;i<18;i++){
+    const d=document.createElement("div"); d.className="palomita";
+    d.style.left = (4+Math.random()*92)+"%";
+    d.style.bottom = "-20px";
+    d.style.animationDuration = (7+Math.random()*7)+"s";
+    d.style.animationDelay = (-Math.random()*9)+"s";
+    d.style.transform = `scale(${.6+Math.random()*.8})`;
+    c.appendChild(d);
+  }
+})();
+
+const dormir = ms => new Promise(r=>setTimeout(r, ms/ CONFIG_VEL));
+function puntoEn(path, t){
+  const L=path.getTotalLength(), p=path.getPointAtLength(L*t);
+  // Aplica la transformación del grupo para colocar la punta en el SVG
+  const m=path.getScreenCTM(), s=svg.getScreenCTM().inverse(), q=m.multiply(s);
+  return {x:p.x*q.a + p.y*q.c + q.e, y:p.x*q.b + p.y*q.d + q.f};
+}
+
+async function escribir(path, ms, miToken){
+  const L=path.getTotalLength();
+  path.style.strokeDasharray=L;
+  path.style.strokeDashoffset=L;
+  punta.style.opacity=1;
+  const t0=performance.now();
+  await new Promise(resolve=>{
+    function paso(now){
+      if(miToken!==token){resolve();return;}
+      let t=Math.min(1,(now-t0)/(ms/CONFIG_VEL));
+      const e=t<.5 ? 2*t*t : 1-Math.pow(-2*t+2,2)/2;  // ease-in-out suave
+      path.style.strokeDashoffset = L*(1-e);
+      try{
+        const local=path.getPointAtLength(L*e);
+        const m=path.getScreenCTM(), s=svg.getScreenCTM().inverse(), q=m.multiply(s);
+        punta.setAttribute("cx", local.x*q.a + local.y*q.c + q.e);
+        punta.setAttribute("cy", local.x*q.b + local.y*q.d + q.f);
+      }catch(err){}
+      if(t<1) requestAnimationFrame(paso); else resolve();
+    }
+    requestAnimationFrame(paso);
+  });
+}
+
+async function animar(){
+  if(corriendo) token++;
+  const mi=++token; corriendo=true;
+
+  // reset
+  trazos.forEach(p=>{p.style.strokeDasharray="none";p.style.strokeDashoffset=0;});
+  gato.style.opacity=0; gato.style.transform="translateY(26px) scale(.86)";
+  punta.style.opacity=0;
+  subrayado.style.opacity=0; subrayado.style.strokeDasharray="none";
+  txtSub.style.opacity=0; txtFirma.style.opacity=0;
+  barra.style.transition="none";
+  barra.style.strokeDashoffset="180";
+  await dormir(60);
+  if(mi!==token)return;
+
+  // 1) Entra el gato (rebote)
+  gato.style.transition="opacity .5s ease, transform .7s cubic-bezier(.2,1.5,.4,1)";
+  gato.style.opacity=1; gato.style.transform="translateY(0) scale(1)";
+  await dormir(780);
+  if(mi!==token)return;
+
+  // 2) Escribe F L O W, trazo a trazo
+  for(let i=0;i<trazos.length;i++){
+    await escribir(trazos[i], i===0?520:430, mi);
+    if(mi!==token)return;
+    await dormir(70);
+  }
+  punta.style.opacity=0;
+  await dormir(140);
+  if(mi!==token)return;
+
+  // 3) Subrayado
+  const L=subrayado.getTotalLength();
+  subrayado.style.opacity=1;
+  subrayado.style.transition="none";
+  subrayado.style.strokeDasharray=L; subrayado.style.strokeDashoffset=L;
+  subrayado.getBoundingClientRect();          // fuerza el inicio de la transición
+  subrayado.style.transition=`stroke-dashoffset ${520/CONFIG_VEL}ms ease-out`;
+  subrayado.style.strokeDashoffset=0;
+  await dormir(360);
+  if(mi!==token)return;
+
+  // 4) Textos y barra de carga
+  txtSub.textContent = TEXTO_SUBTITULO;
+  txtSub.style.transition="opacity .6s ease"; txtSub.style.opacity=.95;
+  txtFirma.style.transition="opacity .6s ease .25s"; txtFirma.style.opacity=.55;
+  barra.style.transition=`stroke-dashoffset ${1100/CONFIG_VEL}ms cubic-bezier(.3,.8,.3,1)`;
+  barra.style.strokeDashoffset="0";
+  await dormir(1300);
+  if(mi!==token)return;
+
+  corriendo=false;
+  // AVISO A LA APP: la intro ha TERMINADO (aquí se cierra el splash).
+  if(!REPETIR) avisarFin();
+  if(REPETIR){ await dormir(900); if(mi===token) animar(); }
+}
+
+function replay(){ return animar(), api; }
+
+/* Avisa a la app de que la intro ha acabado.
+   En Android, registra en el WebView un @JavascriptInterface llamado
+   "introTerminada" dentro del objeto "AndroidFlow". */
+function avisarFin(){
+  if(api.onFin){ try{api.onFin();}catch(e){} }
+  try{
+    if(window.AndroidFlow && window.AndroidFlow.introTerminada)
+      window.AndroidFlow.introTerminada();
+  }catch(e){}
+}
+
+/* Controles del panel */
+document.querySelectorAll("#panel [data-pal]").forEach(b=>
+  b.addEventListener("click",()=>setPaleta(b.dataset.pal)));
+$("#btn_repetir").addEventListener("click",replay);
+$("#btn_app").addEventListener("click",()=>panel.classList.toggle("oculto"));
+if(MODO_APP) panel.classList.add("oculto");
+
+/* Accesibilidad: respeta "reducir movimiento" */
+if(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches){
+  trazos.forEach(p=>{p.style.strokeDasharray="none";p.style.strokeDashoffset=0;});
+  gato.style.opacity=1; gato.style.transform="none";
+  txtSub.style.opacity=.95; txtFirma.style.opacity=.55;
+  subrayado.style.opacity=1;
+  barra.style.transition="none"; barra.style.strokeDashoffset="0";
+  // Sin animación: se muestra todo y se avisa enseguida para no dejar
+  // la pantalla de carga colgada en móviles con "reducir movimiento".
+  setTimeout(avisarFin, 700);
+}else{
+  setPaleta("cine");
+  animar();
+}
+</script>
+</body>
+</html>

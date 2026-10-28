@@ -1,0 +1,190 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  INTRO ANIMADA "FLOW" - Version SVG autonoma (SMIL).
+  Abre este archivo en un navegador (Chrome, Firefox, Edge) o cargalo en un
+  WebView. No necesita internet ni librerias. Duracion total: ~5.5 s.
+
+  PARA CAMBIAR LOS COLORES: edita solo el bloque <style> de abajo
+  (y los dos degradados de <defs>, que llevan los mismos colores).
+  PARA CAMBIAR EL TEXTO: busca "TU ALMACEN, EN MOVIMIENTO".
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 460"
+     width="900" height="460" role="img" aria-label="Intro FLOW con un gato">
+  <title>FLOW · Tu almacén, en movimiento</title>
+
+  <style>
+    .trazo{
+      fill:none; stroke:#ffd79a; stroke-width:11;
+      stroke-linecap:round; stroke-linejoin:round; filter:url(#glow);
+    }
+    .fino{ stroke-width:7 }
+    .subtitulo,.firma{
+      fill:#cfe0ff; font-family:system-ui,'Segoe UI',Roboto,sans-serif;
+      text-anchor:middle; opacity:0;
+    }
+    .subtitulo{ font-size:19px; letter-spacing:7px }
+    .firma{ font-size:12px; letter-spacing:4px }
+    #gato{ opacity:0 }
+    #cola{ transform-origin:205px 290px; animation:menear 2.6s ease-in-out infinite }
+    @keyframes menear{ 0%,100%{transform:rotate(-6deg)} 50%{transform:rotate(9deg)} }
+    .parpado{ transform-box:fill-box; transform-origin:center;
+              animation:parp 4.2s infinite }
+    @keyframes parp{ 0%,92%,100%{transform:scaleY(0)} 95%{transform:scaleY(1)} 97%{transform:scaleY(0)} }
+    .palomita{ fill:#fff3d6; opacity:0 }
+    #barra{ filter:url(#glow) }
+  </style>
+
+  <defs>
+    <radialGradient id="fondo" cx="30%" cy="18%" r="95%">
+      <stop offset="0" stop-color="#172a4d"/>
+      <stop offset="1" stop-color="#0b1226"/>
+    </radialGradient>
+    <linearGradient id="gatoGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f2a65a"/>
+      <stop offset="1" stop-color="#d9853f"/>
+    </linearGradient>
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="4" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <rect width="900" height="460" fill="url(#fondo)"/>
+
+  <!-- palomitas flotando -->
+  <g>
+    <circle class="palomita" cx="90" cy="470" r="5">
+      <animate attributeName="cy" from="470" to="-20" dur="8s" begin="0s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0;.5;.35;0" dur="8s" begin="0s" repeatCount="indefinite"/>
+    </circle>
+    <circle class="palomita" cx="230" cy="470" r="4">
+      <animate attributeName="cy" from="470" to="-20" dur="10s" begin="-3s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0;.45;.3;0" dur="10s" begin="-3s" repeatCount="indefinite"/>
+    </circle>
+    <circle class="palomita" cx="410" cy="470" r="6">
+      <animate attributeName="cy" from="470" to="-20" dur="11s" begin="-6s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0;.4;.25;0" dur="11s" begin="-6s" repeatCount="indefinite"/>
+    </circle>
+    <circle class="palomita" cx="600" cy="470" r="4">
+      <animate attributeName="cy" from="470" to="-20" dur="9s" begin="-2s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0;.5;.3;0" dur="9s" begin="-2s" repeatCount="indefinite"/>
+    </circle>
+    <circle class="palomita" cx="780" cy="470" r="5">
+      <animate attributeName="cy" from="470" to="-20" dur="12s" begin="-7s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0;.4;.3;0" dur="12s" begin="-7s" repeatCount="indefinite"/>
+    </circle>
+  </g>
+
+  <!-- ================= EL GATO ================= -->
+  <g id="gato">
+    <animate attributeName="opacity" from="0" to="1" dur=".5s" begin=".15s" fill="freeze"/>
+    <animateTransform attributeName="transform" type="translate"
+                      values="0 26;0 -5;0 0" dur=".7s" begin=".15s" fill="freeze"/>
+
+    <path id="cola" d="M 205 290 C 275 285, 288 205, 250 178"
+          fill="none" stroke="url(#gatoGrad)" stroke-width="26" stroke-linecap="round"/>
+    <ellipse cx="150" cy="292" rx="76" ry="72" fill="url(#gatoGrad)"/>
+    <ellipse cx="120" cy="352" rx="30" ry="15" fill="#f2a65a"/>
+    <ellipse cx="178" cy="352" rx="30" ry="15" fill="#f2a65a"/>
+
+    <path d="M 88 128 L 80 58 L 137 104 Z" fill="#f2a65a"/>
+    <path d="M 212 128 L 222 58 L 164 104 Z" fill="#f2a65a"/>
+    <path d="M 94 116 L 89 76 L 123 106 Z" fill="#ff9db0" opacity=".85"/>
+    <path d="M 206 116 L 212 76 L 177 106 Z" fill="#ff9db0" opacity=".85"/>
+
+    <circle cx="150" cy="158" r="72" fill="url(#gatoGrad)"/>
+    <ellipse cx="124" cy="150" rx="17" ry="20" fill="#fff8ec"/>
+    <ellipse cx="176" cy="150" rx="17" ry="20" fill="#fff8ec"/>
+    <circle cx="127" cy="152" r="8" fill="#23304d"/>
+    <circle cx="179" cy="152" r="8" fill="#23304d"/>
+    <circle cx="130" cy="149" r="2.6" fill="#ffffff"/>
+    <circle cx="182" cy="149" r="2.6" fill="#ffffff"/>
+    <rect class="parpado" x="106" y="128" width="36" height="44" rx="16" fill="#f2a65a"/>
+    <rect class="parpado" x="158" y="128" width="36" height="44" rx="16" fill="#f2a65a"/>
+    <path d="M 143 176 L 157 176 L 150 184 Z" fill="#ff9db0"/>
+    <path d="M 150 184 Q 138 196 128 188 M 150 184 Q 162 196 172 188"
+          fill="none" stroke="#7a4a2c" stroke-width="3" stroke-linecap="round"/>
+    <g stroke="#fff3d6" stroke-width="2.6" stroke-linecap="round" opacity=".9">
+      <path d="M 112 180 L 68 174"/><path d="M 112 188 L 70 192"/>
+      <path d="M 188 180 L 232 174"/><path d="M 188 188 L 230 192"/>
+    </g>
+
+    <!-- caja de palomitas del almacen -->
+    <rect x="222" y="300" width="66" height="62" rx="6" fill="#e9604f"/>
+    <rect x="222" y="300" width="66" height="14" rx="4" fill="#ffd79a"/>
+    <circle cx="238" cy="300" r="10" fill="#fff3d6"/>
+    <circle cx="255" cy="297" r="12" fill="#fff3d6"/>
+    <circle cx="272" cy="301" r="10" fill="#fff3d6"/>
+    <circle cx="246" cy="291" r="8" fill="#fff3d6"/>
+    <circle cx="266" cy="290" r="8" fill="#fff3d6"/>
+  </g>
+
+  <!-- ================= LETRAS FLOW ================= -->
+  <g transform="translate(310,150) scale(1.18)">
+    <!-- F -->
+    <path class="trazo" d="M 12 150 L 12 8 L 96 8"
+          stroke-dasharray="270" stroke-dashoffset="270">
+      <animate attributeName="stroke-dashoffset" values="270;270;0" keyTimes="0;.18;.42"
+               dur="5.5s" fill="freeze" calcMode="spline"
+               keySplines="0 0 1 1;.4 0 .2 1"/>
+    </path>
+    <path class="trazo fino" d="M 12 78 L 74 78"
+          stroke-dasharray="62" stroke-dashoffset="62">
+      <animate attributeName="stroke-dashoffset" values="62;62;0" keyTimes="0;.42;.5"
+               dur="5.5s" fill="freeze" calcMode="spline"
+               keySplines="0 0 1 1;.4 0 .2 1"/>
+    </path>
+    <!-- L -->
+    <path class="trazo" d="M 124 8 L 124 150 L 204 150"
+          stroke-dasharray="222" stroke-dashoffset="222">
+      <animate attributeName="stroke-dashoffset" values="222;222;0" keyTimes="0;.5;.62"
+               dur="5.5s" fill="freeze" calcMode="spline"
+               keySplines="0 0 1 1;.4 0 .2 1"/>
+    </path>
+    <!-- O -->
+    <path class="trazo" d="M 310 79 C 310 50, 290 26, 266 26 C 242 26, 222 50, 222 79 C 222 108, 242 132, 266 132 C 290 132, 310 108, 310 79 Z"
+          stroke-dasharray="320" stroke-dashoffset="320">
+      <animate attributeName="stroke-dashoffset" values="320;320;0" keyTimes="0;.62;.75"
+               dur="5.5s" fill="freeze" calcMode="spline"
+               keySplines="0 0 1 1;.4 0 .2 1"/>
+    </path>
+    <!-- W -->
+    <path class="trazo" d="M 338 8 L 366 150 L 396 52 L 426 150 L 454 8"
+          stroke-dasharray="410" stroke-dashoffset="410">
+      <animate attributeName="stroke-dashoffset" values="410;410;0" keyTimes="0;.75;.88"
+               dur="5.5s" fill="freeze" calcMode="spline"
+               keySplines="0 0 1 1;.4 0 .2 1"/>
+    </path>
+  </g>
+
+  <!-- subrayado -->
+  <path class="trazo fino" d="M 330 352 Q 580 364 835 352"
+        stroke-dasharray="510" stroke-dashoffset="510">
+    <animate attributeName="stroke-dashoffset" values="510;510;0" keyTimes="0;.85;.92"
+             dur="5.5s" fill="freeze" calcMode="spline"
+             keySplines="0 0 1 1;.4 0 .2 1"/>
+  </path>
+
+  <!-- textos -->
+  <text class="subtitulo" x="450" y="382">TU ALMACEN, EN MOVIMIENTO
+    <animate attributeName="opacity" values="0;0;.95" keyTimes="0;.86;.95"
+             dur="5.5s" fill="freeze"/>
+  </text>
+  <text class="firma" x="450" y="412">CINESTOCK  ·  FLOW
+    <animate attributeName="opacity" values="0;0;.55" keyTimes="0;.9;.99"
+             dur="5.5s" fill="freeze"/>
+  </text>
+
+  <!-- barra de carga -->
+  <line x1="360" y1="432" x2="540" y2="432" stroke="#ffffff"
+        stroke-opacity=".12" stroke-width="4" stroke-linecap="round"/>
+  <g id="barra">
+    <line x1="360" y1="432" x2="540" y2="432" stroke="#ffd79a"
+          stroke-width="4" stroke-linecap="round"
+          stroke-dasharray="180" stroke-dashoffset="180">
+      <animate attributeName="stroke-dashoffset" values="180;180;0" keyTimes="0;.86;1"
+               dur="5.5s" fill="freeze" calcMode="spline"
+               keySplines="0 0 1 1;.3 .8 .3 1"/>
+    </line>
+  </g>
+</svg>
