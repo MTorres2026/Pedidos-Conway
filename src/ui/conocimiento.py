@@ -64,6 +64,9 @@ class Conocimiento(QWidget):
         super().__init__(parent)
 
         self.biblioteca = Biblioteca()
+        # Miniaturas de la primera página de los PDF (temporales de sesión).
+        self._tmp = tempfile.TemporaryDirectory(prefix="cinestock_vista_")
+        self._miniaturas = {}
 
         layout = QVBoxLayout(self)
 
@@ -226,6 +229,60 @@ class Conocimiento(QWidget):
     # ------------------------------------------------------------------
     # Vista previa
     # ------------------------------------------------------------------
+    def _enlace_pulsado(self, url: QUrl):
+        """Enlaces de la vista: abrir el original o salir al navegador."""
+        if url.scheme() == "abrir":
+            self.abrir_original()
+        elif url.scheme() in ("http", "https"):
+            QDesktopServices.openUrl(url)
+
+    def _ruta_local(self, ficha):
+        """Dónde está en este equipo la copia guardada del archivo."""
+        guardada = str(ficha.get("ruta_copia") or "")
+        nombre = guardada.replace("\\", "/").rsplit("/", 1)[-1]
+        candidatas = []
+        if nombre:
+            candidatas.append(self.biblioteca.originales / nombre)
+        if guardada:
+            candidatas.append(Path(guardada))
+        if ficha.get("ruta_origen"):
+            candidatas.append(Path(ficha["ruta_origen"]))
+        original = Path(ficha.get("archivo") or "")
+        if original.is_absolute():
+            candidatas.append(original)
+        for ruta in candidatas:
+            if ruta.is_file():
+                return ruta
+        return None
+
+    def _imagen_documento(self, ficha):
+        """Foto del documento de verdad: la 1ª página si es PDF, o la
+        propia imagen si es una captura. Ruta del PNG o None."""
+        ruta = self._ruta_local(ficha)
+        if ruta is None:
+            return None
+        sufijo = ruta.suffix.lower()
+        if sufijo in (".png", ".jpg", ".jpeg", ".bmp", ".gif"):
+            return ruta
+        if sufijo != ".pdf":
+            return None
+        clave = (str(ruta), ruta.stat().st_mtime)
+        if clave in self._miniaturas:
+            return self._miniaturas[clave]
+        destino = None
+        try:
+            import fitz  # PyMuPDF; si no está, la vista se queda sin foto
+
+            with fitz.open(ruta) as doc:
+                if doc.page_count:
+                    pix = doc[0].get_pixmap(matrix=fitz.Matrix(1.6, 1.6))
+                    destino = Path(self._tmp.name) / f"pag_{abs(hash(clave))}.png"
+                    pix.save(destino)
+        except Exception:
+            destino = None
+        self._miniaturas[clave] = destino
+        return destino
+
     def mostrar_seleccion(self, actual, _anterior):
         if actual is None:
             return
@@ -233,55 +290,94 @@ class Conocimiento(QWidget):
         if not ficha:
             return
 
-        def fila(etiqueta, valor):
-            if not valor:
-                return ""
-            return (f"<b>{etiqueta}:</b> {html.escape(str(valor))}<br>")
+        gris = "#8fa3b8"
+        icono = ICONOS_TIPO.get(ficha["tipo"], "📄")
 
+        # ----- Cabecera: qué es, en cuatro datos claros -----
+        datos = []
+        tipo = ficha["tipo"].upper() if ficha["tipo"] != "correo" else "Correo"
+        if ficha["categoria"]:
+            tipo += f" · {ficha['categoria']}"
+        datos.append(("Tipo", tipo))
+        if ficha["fecha_doc"]:
+            datos.append(("Fecha", ficha["fecha_doc"]))
+        if ficha["remitente"]:
+            datos.append(("De", ficha["remitente"]))
+        if ficha["adjuntos"]:
+            datos.append(("Adjuntos", ficha["adjuntos"]))
+        datos.append(("Importancia", f"{ficha['importancia']:.0f} / 100"
+                      + (f" — {ficha['motivos']}" if ficha["motivos"] else "")))
+        filas = "".join(
+            f'<tr><td style="color:{gris};padding:1px 10px 1px 0">{etiqueta}</td>'
+            f"<td>{html.escape(str(valor))}</td></tr>"
+            for etiqueta, valor in datos
+        )
         cabecera = (
-            f"<h3>{html.escape(ficha['titulo'])}</h3>"
-            + fila("Tipo", ficha["tipo"])
-            + fila("Categoría", ficha["categoria"])
-            + fila("Fecha", ficha["fecha_doc"])
-            + fila("De", ficha["remitente"])
-            + fila("Para", ficha["destinatarios"])
-            + fila("Adjuntos", ficha["adjuntos"] or "")
-            + fila("Importancia", f"{ficha['importancia']:.0f}/100")
-            + fila("Por qué", ficha["motivos"])
-            + fila("Archivo original", ficha["archivo"])
-            + "<hr>"
+            f'<p style="font-size:19px;margin:0 0 8px 0">'
+            f"<b>{icono} {html.escape(ficha['titulo'])}</b></p>"
+            f"<table>{filas}</table>"
+            f'<p style="margin:10px 0 4px 0;font-size:15px">📂 '
+            f'<a href="abrir:original" style="color:#6db3f2">'
+            f"<b>Abrir el documento original</b></a>"
+            f' <span style="color:{gris}">— para leerlo entero, con su formato</span></p>'
         )
 
-        texto = ficha["texto"] or "(Sin texto legible.)"
+        texto = ficha["texto"] or ""
         recortado = len(texto) > MAX_VISTA_PREVIA
         texto = texto[:MAX_VISTA_PREVIA]
-
         palabras = Biblioteca._palabras(self.caja_busqueda.text())
-        cuerpo = self._resaltar(texto, palabras)
+
+        # ----- En resumen: de qué trata, sin abrir nada -----
+        resumen = vista_documento.resumen(texto)
+        caja_resumen = ""
+        if resumen:
+            caja_resumen = (
+                '<table width="100%" cellspacing="0" style="margin:12px 0">'
+                '<tr><td bgcolor="#14202f" style="padding:10px 12px">'
+                f'<span style="color:{gris}">🧭 EN RESUMEN</span><br>'
+                f'<span style="line-height:150%">{html.escape(resumen)}</span>'
+                "</td></tr></table>"
+            )
+
+        # ----- El documento a la vista (PDF o captura) -----
+        foto = self._imagen_documento(ficha)
+        caja_foto = ""
+        if foto is not None:
+            url = QUrl.fromLocalFile(str(foto)).toString()
+            que = "Primera página" if foto.suffix.lower() == ".png" and ficha["tipo"] == "pdf" else "Imagen"
+            caja_foto = (
+                f'<p style="color:{gris};margin:12px 0 4px 0">🖼 {que} del documento:</p>'
+                f'<p style="margin:0 0 6px 0"><img src="{url}" width="680"></p>'
+                f'<p style="color:{gris};margin:0 0 10px 0">'
+                f"Para verlo completo: «Abrir el documento original».</p>"
+            )
+
+        # ----- Contenido limpio y legible -----
+        lista_bloques, hubo_legal = vista_documento.bloques(texto)
+        if lista_bloques:
+            cuerpo = (
+                f'<p style="color:{gris};margin:12px 0 6px 0">📝 CONTENIDO '
+                f'<span>(texto ordenado para leer aquí)</span></p>'
+                + vista_documento.a_html(lista_bloques, palabras)
+            )
+        else:
+            cuerpo = (
+                f'<p style="color:{gris};margin-top:12px">Este elemento no tiene '
+                "texto legible guardado. Ábrelo con «Abrir el documento "
+                "original».</p>"
+            )
+        notas = []
+        if hubo_legal:
+            notas.append("pie legal omitido")
         if recortado:
-            cuerpo += "<p><i>… (texto recortado en pantalla; el original está completo)</i></p>"
+            notas.append("texto recortado en pantalla; el original está completo")
+        if notas:
+            cuerpo += (
+                f'<p style="color:{gris};margin-top:14px"><i>'
+                f"({' · '.join(notas)})</i></p>"
+            )
 
-        self.vista.setHtml(cabecera + cuerpo)
-
-    @staticmethod
-    def _resaltar(texto, palabras):
-        """Escapa el texto y marca en amarillo las palabras buscadas."""
-        if not palabras:
-            return html.escape(texto).replace("\n", "<br>")
-        patron = re.compile(
-            "(" + "|".join(re.escape(p) for p in palabras) + ")", re.IGNORECASE
-        )
-        partes = patron.split(texto)
-        salida = []
-        for i, parte in enumerate(partes):
-            seguro = html.escape(parte).replace("\n", "<br>")
-            if i % 2 == 1:
-                salida.append(
-                    f'<span style="background-color:#ffe08a;color:#000;">{seguro}</span>'
-                )
-            else:
-                salida.append(seguro)
-        return "".join(salida)
+        self.vista.setHtml(cabecera + caja_resumen + caja_foto + cuerpo)
 
     # ------------------------------------------------------------------
     # Añadir
