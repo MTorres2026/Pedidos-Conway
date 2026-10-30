@@ -187,6 +187,7 @@ def bloques(texto: str):
     puntos = []              # viñetas seguidas
     cabeceras = {}           # cabeceras de un mensaje anterior
     en_legal = False
+    legal_cerrado = False    # la última línea legal descartada acababa en «.»
     hubo_legal = False
 
     def cerrar_tablas():

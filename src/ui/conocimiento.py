@@ -6,9 +6,11 @@ La lógica está en modulos/biblioteca.py (sin Qt). Aquí solo hay pantalla.
 """
 
 import html
-import re
+import tempfile
+from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QUrl
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -28,6 +30,7 @@ from PySide6.QtWidgets import (
 )
 
 from modulos.biblioteca import Biblioteca
+from ui import vista_documento
 from ui.apertura_documentos import abrir_original
 
 FILTROS = [
@@ -117,7 +120,7 @@ class Conocimiento(QWidget):
         divisor.addWidget(self.lista)
         divisor.addWidget(self.vista)
         divisor.setStretchFactor(0, 2)
-        divisor.setStretchFactor(1, 3)
+        divisor.setStretchFactor(1, 4)
         layout.addWidget(divisor, 1)
 
         # ----- Acciones sobre el elemento elegido -----
@@ -147,6 +150,7 @@ class Conocimiento(QWidget):
         self.caja_busqueda.returnPressed.connect(self.refrescar)
         self.combo_filtro.currentIndexChanged.connect(self.refrescar)
         self.lista.currentItemChanged.connect(self.mostrar_seleccion)
+        self.vista.anchorClicked.connect(self._enlace_pulsado)
         self.boton_destacar.clicked.connect(self.alternar_destacado)
         self.boton_archivar.clicked.connect(self.alternar_archivado)
         self.boton_abrir.clicked.connect(self.abrir_original)
