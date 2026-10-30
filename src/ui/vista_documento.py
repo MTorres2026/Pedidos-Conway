@@ -362,7 +362,7 @@ def resumen(texto: str, maximo: int = 320) -> str:
 # De bloques a HTML legible (con resaltado de la búsqueda y enlaces)
 # ---------------------------------------------------------------------------
 
-_GRIS = "#8fa3b8"
+_GRIS = "#6f6450"  # texto secundario sobre el fondo papel (#f6f1e7)
 
 
 def _con_estilo(texto: str, palabras) -> str:
@@ -389,7 +389,7 @@ def _con_estilo(texto: str, palabras) -> str:
             continue
         if es_url:
             seguro = html.escape(trozo, quote=True)
-            salida.append(f'<a href="{seguro}" style="color:#6db3f2">{seguro}</a>')
+            salida.append(f'<a href="{seguro}" style="color:#1f6fb4">{seguro}</a>')
             continue
         if patron is None:
             salida.append(html.escape(trozo))
@@ -440,7 +440,7 @@ def a_html(lista_bloques, palabras=()) -> str:
                 filas.append(f"<tr>{celdas}</tr>")
             partes.append(
                 '<table border="1" cellspacing="0" '
-                'style="border-color:#334154;margin:6px 0 12px 0">'
+                'style="border-color:#c4b28a;margin:6px 0 12px 0">'
                 + "".join(filas) + "</table>"
             )
         elif tipo == "hilo":
