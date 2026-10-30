@@ -117,6 +117,12 @@ class Conocimiento(QWidget):
         self.lista = QListWidget()
         self.vista = QTextBrowser()
         self.vista.setOpenLinks(False)
+        # Panel de lectura en «papel» cálido: distinto del resto de la
+        # ventana y pensado para leer documentos largos sin cansancio.
+        self.vista.setStyleSheet(
+            "QTextBrowser { background-color: #f6f1e7; color: #26303a; "
+            "selection-background-color: #ffe08a; selection-color: #000000; }"
+        )
         divisor.addWidget(self.lista)
         divisor.addWidget(self.vista)
         divisor.setStretchFactor(0, 2)
@@ -294,7 +300,7 @@ class Conocimiento(QWidget):
         if not ficha:
             return
 
-        gris = "#8fa3b8"
+        gris = "#6f6450"  # etiquetas y notas sobre el fondo papel
         icono = ICONOS_TIPO.get(ficha["tipo"], "📄")
 
         # ----- Cabecera: qué es, en cuatro datos claros -----
@@ -321,7 +327,7 @@ class Conocimiento(QWidget):
             f"<b>{icono} {html.escape(ficha['titulo'])}</b></p>"
             f"<table>{filas}</table>"
             f'<p style="margin:10px 0 4px 0;font-size:15px">📂 '
-            f'<a href="abrir:original" style="color:#6db3f2">'
+            f'<a href="abrir:original" style="color:#1f6fb4">'
             f"<b>Abrir el documento original</b></a>"
             f' <span style="color:{gris}">— para leerlo entero, con su formato</span></p>'
         )
@@ -337,7 +343,7 @@ class Conocimiento(QWidget):
         if resumen:
             caja_resumen = (
                 '<table width="100%" cellspacing="0" style="margin:12px 0">'
-                '<tr><td bgcolor="#14202f" style="padding:10px 12px">'
+                '<tr><td bgcolor="#ece1c9" style="padding:10px 12px">'
                 f'<span style="color:{gris}">🧭 EN RESUMEN</span><br>'
                 f'<span style="line-height:150%">{html.escape(resumen)}</span>'
                 "</td></tr></table>"
