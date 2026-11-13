@@ -1,0 +1,3 @@
+# Requisitos para generar los informes PDF de pedidos manuales.
+pypdf>=5,<8
+reportlab>=4,<6

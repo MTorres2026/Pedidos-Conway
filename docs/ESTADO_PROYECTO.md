@@ -306,3 +306,17 @@ También se ha añadido un mensaje controlado cuando no existe un procedimiento 
 Estado:
 
 FUNCIONANDO Y PROBADO.
+
+---
+
+## 18. Pedidos manuales desde la oficina
+
+Se ha añadido en **Pedidos Conway** la opción **PEDIDO MANUAL** para crear un pedido desde el ordenador sin depender de la tablet o del teléfono Android.
+
+El flujo permite cargar el PDF **Stockable** actual, buscar productos en `data/supermaestro.json` (o, como alternativa, `data/supermaestro_flow.json`), añadirlos y ajustar cantidades. Al confirmar, CineStock localiza cada producto en el Stockable por su `ID VISTA`, escribe la cantidad pedida en la columna **Stocktake Count** (sin alterar existencias ni el resto del informe) y asocia el PDF generado al `orderId` dentro de `data/pdf_pedidos/`. Si posteriormente se corrige una cantidad en pantalla, el Stockable asociado del pedido manual se regenera automáticamente.
+
+Al confirmar, el pedido se guarda con identificador interno `MANUAL-...`, queda en el historial y se muestra como **PENDIENTE** para revisión. No se envía al ERP hasta que la persona pulse **ENVIAR A ERP**; el robot conserva la revisión y el guardado final manual en PeopleSoft. Para evitar sustituir trabajo sin revisar, no se permite crear otro mientras haya un pedido pendiente.
+
+Se ha incorporado `src/recursos/Hoja_de_Pedido_Graneles_Oficial.pdf` y el flujo de pedido manual identifica sus códigos ERP (100 productos únicos), rellena la columna **CANTIDAD** por código ERP y asocia el informe como `{fecha}_pedido_{orderId}_granel.pdf` cuando el pedido incluye productos de esa plantilla. Los artículos repetidos en varias categorías se desambiguan con la descripción del catálogo; si no se puede identificar la fila con seguridad, se cancela la generación con un error claro. Los pedidos sin productos Granel no reciben un PDF Granel vacío. Las líneas Granel se excluyen del Stockable aunque no tengan `ID VISTA`, y ambos informes se regeneran cuando se corrigen cantidades.
+
+La lógica de catálogo, validación, guardado y generación/actualización de ambos informes está cubierta por `tests/test_pedido_manual.py` y `tests/test_informes_pedido.py`. El recurso se incluye en `src/recursos`, carpeta ya recogida por `CineStock.spec`. Para empaquetar o ejecutar la generación PDF se requieren `pypdf` y `reportlab` (`requirements-pdf.txt`). Queda probar las ventanas PySide6 en el entorno Windows habitual de CineStock.

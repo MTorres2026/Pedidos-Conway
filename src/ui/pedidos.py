@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QFormLayout,
     QLineEdit,
-    QSpinBox,
+    QDoubleSpinBox,
     QComboBox,
     QAbstractItemView,
     QFrame,
@@ -27,6 +27,19 @@ from PySide6.QtWidgets import (
 # Importamos las herramientas de PDF de PySide6
 from PySide6.QtPdfWidgets import QPdfView
 from PySide6.QtPdf import QPdfDocument
+
+from modulos.informes_pedido import (
+    ErrorInformePedido,
+    generar_stockable_rellenado,
+)
+from modulos.pedido_manual import (
+    ErrorPedidoManual,
+    actualizar_granel_pedido,
+    actualizar_stockable_pedido,
+    crear_datos_pedido as construir_datos_pedido_manual,
+    guardar_pedido_manual,
+)
+from ui.pedido_manual import PedidoManualDialog
 
 
 class VisorPDFDialog(QDialog):
@@ -317,6 +330,13 @@ class HistorialPedidosDialog(QDialog):
                     archivo.unlink()
                 except OSError as e:
                     errores.append(f"{archivo.name}: {e}")
+            plantillas_dir = pdf_dir / ".plantillas"
+            if plantillas_dir.exists():
+                for archivo in list(plantillas_dir.glob("*.pdf")):
+                    try:
+                        archivo.unlink()
+                    except OSError as e:
+                        errores.append(f"{archivo.name}: {e}")
 
         # 5) Refrescar la tabla en pantalla
         self.cargar_historial()
@@ -678,6 +698,14 @@ class Pedidos(QWidget):
         )
         cabecera.addStretch()
 
+        self.boton_pedido_manual = QPushButton("✍ PEDIDO MANUAL")
+        self.boton_pedido_manual.setMinimumHeight(40)
+        self.boton_pedido_manual.setToolTip(
+            "Crear un pedido en la oficina consultando el informe Stockable."
+        )
+        self.boton_pedido_manual.clicked.connect(self.crear_pedido_manual)
+        cabecera.addWidget(self.boton_pedido_manual)
+
         # Layout para Stockable (Ver + Descargar)
         layout_stockable = QHBoxLayout()
         self.boton_ver_stockable = QPushButton("📄 VER STOCKABLE")
@@ -952,12 +980,14 @@ class Pedidos(QWidget):
             True
         )
 
-        self.campo_cantidad = QSpinBox()
+        self.campo_cantidad = QDoubleSpinBox()
 
         self.campo_cantidad.setRange(
             0,
             999999
         )
+        self.campo_cantidad.setDecimals(3)
+        self.campo_cantidad.setSingleStep(1)
 
         formulario.addRow(
             "Producto:",
@@ -1075,6 +1105,109 @@ class Pedidos(QWidget):
 
         layout_principal.addWidget(
             self.estado_label
+        )
+
+    def crear_pedido_manual(self):
+        """Crea un pedido desde el escritorio sin depender del móvil."""
+        if self.obtener_estado_activo() == "PENDIENTE":
+            order_id = self.obtener_order_id_estado()
+            referencia = f" #{order_id}" if order_id else ""
+            QMessageBox.warning(
+                self,
+                "Ya hay un pedido pendiente",
+                "No se puede iniciar otro pedido mientras haya uno pendiente"
+                f"{referencia}.\n\n"
+                "Revísalo o envíalo primero para no sustituirlo por error."
+            )
+            return
+
+        dialogo = PedidoManualDialog(self.base_dir / "data", self)
+        if dialogo.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        try:
+            lineas = dialogo.lineas_pedido()
+            pdf_stockable = getattr(dialogo, "pdf_stockable", None)
+            if pdf_stockable is None:
+                pdf_stockable = generar_stockable_rellenado(
+                    dialogo.ruta_stockable,
+                    lineas,
+                )
+            datos = construir_datos_pedido_manual(lineas)
+            guardar_pedido_manual(
+                self.base_dir / "data",
+                datos,
+                pdf_stockable=pdf_stockable,
+                pdf_granel=getattr(dialogo, "pdf_granel", None),
+                ruta_stockable_origen=dialogo.ruta_stockable,
+            )
+        except (ErrorPedidoManual, ErrorInformePedido, OSError, ValueError) as e:
+            QMessageBox.critical(
+                self,
+                "No se pudo crear el pedido",
+                f"CineStock no pudo crear el pedido y sus informes:\n\n{e}"
+            )
+            return
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "No se pudo crear el pedido",
+                f"Error inesperado al guardar el pedido manual:\n\n{e}"
+            )
+            return
+
+        pedido = datos["pedido"]
+        order_id = pedido["orderId"]
+        self.guardar_estado_pedido(order_id, "PENDIENTE")
+        self.estado_actual = {"orderId": order_id, "estado": "PENDIENTE"}
+
+        # Deja el pedido visible inmediatamente en esta misma pantalla. El
+        # temporizador de recepción seguirá funcionando para los pedidos Android.
+        self.datos_pedido = datos
+        self.order_id_actual = order_id
+        self.pedido_coherente = True
+        self.pedido_mostrado = True
+        self.fila_seleccionada = None
+        self.panel_correccion.hide()
+        try:
+            self.ultimo_mtime = self.archivo_pedido.stat().st_mtime
+        except OSError:
+            self.ultimo_mtime = None
+        self.actualizar_interfaz()
+
+        aviso_registro = ""
+        try:
+            from modulos.registro_pedidos import Registro
+
+            Registro(
+                ruta_db=self.base_dir / "data" / "registro_pedidos.db",
+                historial_dir=self.historial_dir,
+            ).asegurar(
+                order_id,
+                pedido.get("fechaCreacion", ""),
+                len(datos.get("lineas", [])),
+            )
+        except Exception as e:
+            aviso_registro = (
+                "\n\nAviso: no se pudo actualizar el Registro de pedidos "
+                f"({e}). El pedido sí está guardado en el historial."
+            )
+
+        mensaje_informes = (
+            "El Stockable quedó asociado al pedido. "
+            + (
+                "También se generó y asoció el informe oficial de Granel."
+                if datos["pedido"].get("informes", {}).get("granel")
+                else "No había líneas de productos publicadas en la plantilla de Granel."
+            )
+        )
+        QMessageBox.information(
+            self,
+            "Pedido manual creado",
+            f"Pedido {order_id} creado con {len(datos['lineas'])} líneas.\n\n"
+            f"{mensaje_informes} Está pendiente de revisión; no se ha enviado "
+            "al ERP. Comprueba las cantidades y pulsa ENVIAR A ERP cuando esté listo."
+            + aviso_registro,
         )
 
     # ==========================================================
@@ -1285,6 +1418,14 @@ class Pedidos(QWidget):
 
         estado = (
             self.obtener_estado_activo()
+        )
+
+        pendiente_existente = estado == "PENDIENTE"
+        self.boton_pedido_manual.setEnabled(not pendiente_existente)
+        self.boton_pedido_manual.setToolTip(
+            "Revise o envíe el pedido pendiente antes de crear otro."
+            if pendiente_existente
+            else "Crear un pedido en la oficina consultando el informe Stockable."
         )
 
         if not self.pedido_coherente:
@@ -1674,18 +1815,11 @@ class Pedidos(QWidget):
         )
 
         try:
+            cantidad_num = float(str(cantidad).strip().replace(",", "."))
+        except (TypeError, ValueError):
+            cantidad_num = 0
 
-            cantidad_int = int(
-                float(cantidad)
-            )
-
-        except Exception:
-
-            cantidad_int = 0
-
-        self.campo_cantidad.setValue(
-            cantidad_int
-        )
+        self.campo_cantidad.setValue(cantidad_num)
 
         self.panel_correccion.show()
 
@@ -1742,9 +1876,9 @@ class Pedidos(QWidget):
                 cantidad_actual
             )
 
-        nueva_cantidad = (
-            self.campo_cantidad.value()
-        )
+        nueva_cantidad = self.campo_cantidad.value()
+        if float(nueva_cantidad).is_integer():
+            nueva_cantidad = int(nueva_cantidad)
 
         nuevo_codigo = (
             self.campo_codigo
@@ -1813,10 +1947,27 @@ class Pedidos(QWidget):
 
         self.panel_correccion.hide()
 
+        aviso_pdf = ""
+        if pedido.get("origen") == "manual-oficina":
+            try:
+                actualizar_stockable_pedido(
+                    self.base_dir / "data",
+                    self.datos_pedido,
+                )
+                actualizar_granel_pedido(
+                    self.base_dir / "data",
+                    self.datos_pedido,
+                )
+            except (ErrorInformePedido, ErrorPedidoManual, OSError, ValueError) as e:
+                aviso_pdf = (
+                    "\n\nAviso: no se pudieron actualizar los informes "
+                    f"Stockable/Granel con la nueva cantidad ({e})."
+                )
+
         QMessageBox.information(
             self,
             "Corrección guardada",
-            "La corrección se ha guardado correctamente."
+            "La corrección se ha guardado correctamente." + aviso_pdf
         )
 
     # ==========================================================
@@ -2232,12 +2383,23 @@ class Pedidos(QWidget):
             print(f"DEBUG: La carpeta de PDFs no existe en: {pdf_dir}")
             return None
 
-        order_id_str = str(self.order_id_actual).lower()
+        pedido = (self.datos_pedido or {}).get("pedido", {})
+        informes = pedido.get("informes", {}) if isinstance(pedido, dict) else {}
+        clave_informe = "granel" if sufijo == "_granel" else "stockable"
+        nombre_registrado = informes.get(clave_informe) if isinstance(informes, dict) else None
+        if nombre_registrado:
+            nombre_registrado = str(nombre_registrado)
+            if Path(nombre_registrado).name == nombre_registrado:
+                archivo_registrado = pdf_dir / nombre_registrado
+                if archivo_registrado.is_file():
+                    return archivo_registrado
 
-        # Buscamos archivos que contengan el order_id (ignorando mayúsculas) y el sufijo
+        order_id_str = str(self.order_id_actual).lower()
+        sufijo_archivo = f"_pedido_{order_id_str}{sufijo}.pdf"
+
+        # Mantiene compatibilidad con los pedidos recibidos por el receptor.
         for archivo in pdf_dir.glob("*.pdf"):
-            nombre_archivo = archivo.name.lower()
-            if order_id_str in nombre_archivo and nombre_archivo.endswith(f"{sufijo}.pdf"):
+            if archivo.name.lower().endswith(sufijo_archivo):
                 return archivo
 
         # Si llegamos aquí, no se encontró. Imprimimos en consola para debug.
@@ -2245,6 +2407,21 @@ class Pedidos(QWidget):
         print(f"DEBUG: Archivos disponibles en la carpeta: {[f.name for f in pdf_dir.glob('*.pdf')]}")
 
         return None
+
+    def _mensaje_pdf_granel_ausente(self):
+        pedido = (self.datos_pedido or {}).get("pedido", {})
+        informes = pedido.get("informes", {}) if isinstance(pedido, dict) else {}
+        if (
+            isinstance(pedido, dict)
+            and pedido.get("origen") == "manual-oficina"
+            and isinstance(informes, dict)
+            and not informes.get("granel")
+        ):
+            return (
+                "Este pedido manual no tiene PDF Granel asociado porque no "
+                "incluye productos publicados en la plantilla oficial."
+            )
+        return "No se ha recibido el PDF de Granel para este pedido."
 
     def descargar_pdf(self, archivo_pdf, nombre_descarga):
         """Descarga el PDF a la carpeta 'descargas'."""
@@ -2294,7 +2471,11 @@ class Pedidos(QWidget):
             except Exception as e:
                 QMessageBox.warning(self, "Error", f"No se pudo abrir el PDF de Granel:\n{e}")
         else:
-            QMessageBox.warning(self, "No encontrado", "No se ha recibido el PDF de Granel para este pedido")
+            QMessageBox.warning(
+                self,
+                "No encontrado",
+                self._mensaje_pdf_granel_ausente(),
+            )
 
     def descargar_stockable(self):
         """Descarga el PDF Stockable."""
@@ -2319,5 +2500,5 @@ class Pedidos(QWidget):
             QMessageBox.warning(
                 self,
                 "No encontrado",
-                "No se ha recibido el PDF de Granel para este pedido."
+                self._mensaje_pdf_granel_ausente(),
             )

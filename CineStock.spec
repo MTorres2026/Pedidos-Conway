@@ -6,7 +6,11 @@ a = Analysis(
     pathex=['src'],
     binaries=[],
     datas=[('src/datos', 'datos'), ('src/recursos', 'recursos')],
-    hiddenimports=[],
+    hiddenimports=[
+        'pypdf',
+        'reportlab.pdfgen.canvas',
+        'reportlab.lib.colors',
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
