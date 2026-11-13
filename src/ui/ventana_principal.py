@@ -29,12 +29,39 @@ class VentanaPrincipal(QMainWindow):
         self.resize(1200, 700)
 
         contenedor = QWidget()
+        contenedor.setObjectName("raizCineStock")
         self.setCentralWidget(contenedor)
+        self.setStyleSheet("""
+            QMainWindow, QWidget#raizCineStock, QWidget#zonaContenido {
+                background-color: #ffffff;
+            }
+            QListWidget#menuLateral {
+                background-color: #343a40;
+                color: #f5f6f7;
+                border: none;
+                outline: none;
+                padding: 8px 0;
+            }
+            QListWidget#menuLateral::item {
+                padding: 11px 12px;
+                border-left: 4px solid transparent;
+            }
+            QListWidget#menuLateral::item:hover {
+                background-color: #495057;
+            }
+            QListWidget#menuLateral::item:selected {
+                background-color: #495057;
+                color: #ffffff;
+                border-left: 4px solid #56a8ff;
+                font-weight: bold;
+            }
+        """)
 
         layout = QHBoxLayout(contenedor)
 
         # ===== Menú lateral =====
         self.menu = QListWidget()
+        self.menu.setObjectName("menuLateral")
         self.menu.setFixedWidth(220)
 
         self.menu.addItem("🏠 Inicio")          # Índice 0
@@ -48,6 +75,7 @@ class VentanaPrincipal(QMainWindow):
 
         # ===== Zona principal =====
         contenido = QWidget()
+        contenido.setObjectName("zonaContenido")
         layout_contenido = QVBoxLayout(contenido)
 
         self.inicio = Inicio()
