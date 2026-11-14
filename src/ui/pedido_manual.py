@@ -53,6 +53,42 @@ class PedidoManualDialog(QDialog):
             self.error_catalogo = str(exc)
 
         self.setWindowTitle("Nuevo pedido Conway · oficina")
+        # El formulario de pedido manual mantiene deliberadamente el tema
+        # claro, aunque el resto de CineStock use el tema oscuro.
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #ffffff;
+                color: #202124;
+            }
+            QDialog QLabel {
+                background-color: transparent;
+                color: #202124;
+            }
+            QDialog QLineEdit, QDialog QTableWidget,
+            QDialog QDoubleSpinBox, QDialog QComboBox {
+                background-color: #ffffff;
+                color: #202124;
+                border: 1px solid #c9cdd2;
+                selection-background-color: #cfe3f5;
+                selection-color: #202124;
+            }
+            QDialog QHeaderView::section {
+                background-color: #eef1f4;
+                color: #202124;
+                border: 1px solid #d5d9de;
+                padding: 4px;
+            }
+            QDialog QPushButton {
+                background-color: #f5f6f7;
+                color: #202124;
+                border: 1px solid #c9cdd2;
+                border-radius: 4px;
+                padding: 5px 8px;
+            }
+            QDialog QPushButton:hover {
+                background-color: #e8edf2;
+            }
+        """)
         self.resize(1060, 700)
         self.setMinimumSize(820, 600)
 
@@ -72,7 +108,7 @@ class PedidoManualDialog(QDialog):
         )
         ayuda.setWordWrap(True)
         ayuda.setStyleSheet(
-            "background-color: #35434c; color: #e4ebef; "
+            "background-color: #eef5fb; color: #263238; "
             "padding: 9px; border-radius: 5px;"
         )
         layout.addWidget(ayuda)
@@ -109,7 +145,7 @@ class PedidoManualDialog(QDialog):
                 f"Catálogo listo · {len(self.productos)} productos con código "
                 "y unidad ERP"
             )
-            self.etiqueta_catalogo.setStyleSheet("color: #c7d0d6;")
+            self.etiqueta_catalogo.setStyleSheet("color: #455a64;")
         layout.addWidget(self.etiqueta_catalogo)
 
         layout.addWidget(QLabel("1. Busca y añade productos"))
