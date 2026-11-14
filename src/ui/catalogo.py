@@ -164,7 +164,7 @@ class Catalogo(QWidget):
         layout.addLayout(barra)
 
         self.etiqueta_estado = QLabel("")
-        self.etiqueta_estado.setStyleSheet("color: #455a64;")
+        self.etiqueta_estado.setStyleSheet("color: #c7d0d6;")
         layout.addWidget(self.etiqueta_estado)
 
         # ------------------------------------------------------------

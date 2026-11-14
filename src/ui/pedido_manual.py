@@ -72,7 +72,8 @@ class PedidoManualDialog(QDialog):
         )
         ayuda.setWordWrap(True)
         ayuda.setStyleSheet(
-            "background-color: #eef5fb; padding: 9px; border-radius: 5px;"
+            "background-color: #35434c; color: #e4ebef; "
+            "padding: 9px; border-radius: 5px;"
         )
         layout.addWidget(ayuda)
 
@@ -108,7 +109,7 @@ class PedidoManualDialog(QDialog):
                 f"Catálogo listo · {len(self.productos)} productos con código "
                 "y unidad ERP"
             )
-            self.etiqueta_catalogo.setStyleSheet("color: #455a64;")
+            self.etiqueta_catalogo.setStyleSheet("color: #c7d0d6;")
         layout.addWidget(self.etiqueta_catalogo)
 
         layout.addWidget(QLabel("1. Busca y añade productos"))

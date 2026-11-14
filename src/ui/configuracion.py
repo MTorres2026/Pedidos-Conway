@@ -37,7 +37,7 @@ class Configuracion(QWidget):
             "antes de que te encuentres el problema a medio pedido."
         )
         subtitulo.setWordWrap(True)
-        subtitulo.setStyleSheet("color: #607080;")
+        subtitulo.setStyleSheet("color: #b0bec5;")
         layout.addWidget(subtitulo)
 
         layout.addSpacing(12)
@@ -128,7 +128,7 @@ class Configuracion(QWidget):
             fila_layout.setContentsMargins(10, 8, 10, 8)
 
             icono = "✅" if ok else "❌"
-            color = "#1b6e2f" if ok else "#b00020"
+            color = "#66d17a" if ok else "#ff6b6b"
 
             etiqueta = QLabel(f"{icono}  {texto}")
             etiqueta.setStyleSheet(f"font-size: 15px; font-weight: bold; color: {color};")
@@ -136,12 +136,12 @@ class Configuracion(QWidget):
 
             if not ok and detalle:
                 aviso = QLabel(detalle)
-                aviso.setStyleSheet("color: #455a64; padding-left: 26px;")
+                aviso.setStyleSheet("color: #c7d0d6; padding-left: 26px;")
                 aviso.setWordWrap(True)
                 fila_layout.addWidget(aviso)
 
             fila.setStyleSheet(
-                "QFrame { background-color: #f4f6f8; border-radius: 6px; }"
+                "QFrame { background-color: #444444; border-radius: 6px; }"
             )
 
             self.lista.addWidget(fila)

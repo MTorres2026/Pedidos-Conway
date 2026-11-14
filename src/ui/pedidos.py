@@ -761,8 +761,8 @@ class Pedidos(QWidget):
 
         self.panel_pendiente.setStyleSheet("""
             QFrame#panelPendiente {
-                background-color: #f4f6f8;
-                border: 1px solid #8a9aaa;
+                background-color: #444444;
+                border: 1px solid #606060;
                 border-radius: 8px;
             }
 
@@ -791,7 +791,7 @@ class Pedidos(QWidget):
 
         indicador.setStyleSheet("""
             QLabel {
-                color: #c62828;
+                color: #ff6b6b;
                 font-size: 20px;
                 font-weight: bold;
             }
@@ -802,7 +802,7 @@ class Pedidos(QWidget):
 
         self.texto_pendiente.setStyleSheet("""
             QLabel {
-                color: #263238;
+                color: #f1f1f1;
                 font-size: 18px;
                 font-weight: bold;
             }
@@ -828,7 +828,7 @@ class Pedidos(QWidget):
 
         self.info_pendiente.setStyleSheet("""
             QLabel {
-                color: #455a64;
+                color: #c7d0d6;
                 font-size: 14px;
                 padding-left: 27px;
                 padding-top: 2px;
@@ -1097,7 +1097,7 @@ class Pedidos(QWidget):
 
         self.estado_label.setStyleSheet("""
             QLabel {
-                color: #455a64;
+                color: #c7d0d6;
                 font-size: 14px;
                 padding: 8px;
             }

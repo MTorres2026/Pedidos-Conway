@@ -33,10 +33,43 @@ class VentanaPrincipal(QMainWindow):
         self.setCentralWidget(contenedor)
         self.setStyleSheet("""
             QMainWindow, QWidget#raizCineStock, QWidget#zonaContenido {
-                background-color: #ffffff;
+                background-color: #383838;
+                color: #eeeeee;
+            }
+            QWidget#zonaContenido QWidget {
+                background-color: #383838;
+                color: #eeeeee;
+            }
+            QLabel {
+                background-color: transparent;
+                color: #eeeeee;
+            }
+            QPushButton {
+                background-color: #303030;
+                color: #eeeeee;
+                border: 1px solid #555555;
+                border-radius: 3px;
+                padding: 5px 8px;
+            }
+            QPushButton:hover {
+                background-color: #484848;
+            }
+            QLineEdit, QTextEdit, QTextBrowser, QTableWidget, QTableView,
+            QComboBox, QSpinBox, QDoubleSpinBox {
+                background-color: #292929;
+                color: #eeeeee;
+                border: 1px solid #555555;
+                selection-background-color: #316c73;
+                selection-color: #ffffff;
+            }
+            QHeaderView::section {
+                background-color: #252525;
+                color: #eeeeee;
+                border: 1px solid #494949;
+                padding: 4px;
             }
             QListWidget#menuLateral {
-                background-color: #343a40;
+                background-color: #242424;
                 color: #f5f6f7;
                 border: none;
                 outline: none;
@@ -47,12 +80,12 @@ class VentanaPrincipal(QMainWindow):
                 border-left: 4px solid transparent;
             }
             QListWidget#menuLateral::item:hover {
-                background-color: #495057;
+                background-color: #414141;
             }
             QListWidget#menuLateral::item:selected {
-                background-color: #495057;
+                background-color: #3c666b;
                 color: #ffffff;
-                border-left: 4px solid #56a8ff;
+                border-left: 4px solid #36a0a8;
                 font-weight: bold;
             }
         """)
