@@ -54,11 +54,39 @@ COLUMNAS = [
 ]
 
 
+_ESTILO_DIALOGO_OSCURO = """
+    QDialog { background-color: #24272b; color: #f0f0f0; }
+    QDialog QLabel { background: transparent; color: #f0f0f0; }
+    QDialog QLineEdit, QDialog QTableWidget {
+        background-color: #292c30;
+        color: #f0f0f0;
+        border: 1px solid #50545a;
+        selection-background-color: #315d7a;
+        selection-color: #ffffff;
+    }
+    QDialog QHeaderView::section {
+        background-color: #202327;
+        color: #f0f0f0;
+        border: 1px solid #484c52;
+        padding: 4px;
+    }
+    QDialog QPushButton {
+        background-color: #303338;
+        color: #f0f0f0;
+        border: 1px solid #50545a;
+        border-radius: 4px;
+        padding: 5px 8px;
+    }
+    QDialog QPushButton:hover { background-color: #41464d; }
+"""
+
+
 class EditorIdsDialog(QDialog):
     """Formulario para anotar o corregir los números de un pedido."""
 
     def __init__(self, rec, parent=None):
         super().__init__(parent)
+        self.setStyleSheet(_ESTILO_DIALOGO_OSCURO)
         self.setWindowTitle(f"Anotar datos · {rec['order_id']}")
         self.resize(500, 0)
 
@@ -248,6 +276,7 @@ class RegistroPedidosDialog(QDialog):
 
     def __init__(self, parent=None, registro=None):
         super().__init__(parent)
+        self.setStyleSheet(_ESTILO_DIALOGO_OSCURO)
 
         self.registro = registro or Registro()
         self._firma = None
